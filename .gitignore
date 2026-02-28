@@ -22,6 +22,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 *.pyc
+*.egg-info/
 
 # Convex / build artifacts
 .convex/
