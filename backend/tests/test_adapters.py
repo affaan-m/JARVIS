@@ -9,6 +9,8 @@ Validates that each adapter:
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
@@ -164,6 +166,18 @@ class TestExaEnrichmentClient:
     def test_enrich_returns_hits_when_configured(
         self, exa_configured: ExaEnrichmentClient
     ) -> None:
+        mock_result = SimpleNamespace(
+            title="Test Person - LinkedIn",
+            url="https://linkedin.com/in/testperson",
+            text="Test Person is an engineer at TestCorp.",
+            highlights=["engineer at TestCorp"],
+            score=0.9,
+        )
+        mock_response = SimpleNamespace(results=[mock_result])
+        mock_exa = MagicMock()
+        mock_exa.search_and_contents.return_value = mock_response
+        exa_configured._client = mock_exa
+
         req = EnrichmentRequest(name="Test Person", company="TestCorp")
         result = asyncio.run(exa_configured.enrich_person(req))
         assert result.success is True

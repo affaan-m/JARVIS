@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import pytest
 
 from config import Settings
@@ -106,6 +109,18 @@ async def test_exa_enrich_person_unconfigured() -> None:
 @pytest.mark.anyio
 async def test_exa_enrich_person_configured() -> None:
     client = ExaEnrichmentClient(Settings(EXA_API_KEY="test-key"))
+    mock_result = SimpleNamespace(
+        title="Test User - LinkedIn",
+        url="https://linkedin.com/in/testuser",
+        text="Test User is a developer.",
+        highlights=["developer"],
+        score=0.9,
+    )
+    mock_response = SimpleNamespace(results=[mock_result])
+    mock_exa = MagicMock()
+    mock_exa.search_and_contents.return_value = mock_response
+    client._client = mock_exa
+
     result = await client.enrich_person(EnrichmentRequest(name="Test User"))
     assert result.success is True
     assert len(result.hits) == 1

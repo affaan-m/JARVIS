@@ -15,9 +15,13 @@ from identification.models import (
 )
 from synthesis.models import (
     ConnectionEdge,
+    DossierReport,
+    EducationEntry,
     SocialProfile,
+    SocialProfiles,
     SynthesisRequest,
     SynthesisResult,
+    WorkHistoryEntry,
 )
 
 # --- Enrichment models ---
@@ -158,6 +162,7 @@ def test_synthesis_result_defaults() -> None:
     assert result.connections == []
     assert result.key_facts == []
     assert result.confidence_score == 0.0
+    assert result.dossier is None
     assert result.success is True
 
 
@@ -181,3 +186,62 @@ def test_synthesis_result_with_data() -> None:
     assert len(result.social_profiles) == 1
     assert len(result.connections) == 1
     assert result.confidence_score == 0.85
+
+
+# --- Dossier models ---
+
+
+def test_work_history_entry() -> None:
+    entry = WorkHistoryEntry(role="Engineer", company="Acme")
+    assert entry.role == "Engineer"
+    assert entry.period is None
+
+
+def test_education_entry() -> None:
+    entry = EducationEntry(school="MIT", degree="BS CS")
+    assert entry.school == "MIT"
+    assert entry.degree == "BS CS"
+
+
+def test_social_profiles_defaults() -> None:
+    sp = SocialProfiles()
+    assert sp.linkedin is None
+    assert sp.twitter is None
+    assert sp.github is None
+
+
+def test_dossier_report_defaults() -> None:
+    report = DossierReport()
+    assert report.summary == ""
+    assert report.work_history == []
+    assert report.education == []
+    assert report.conversation_hooks == []
+    assert report.risk_flags == []
+
+
+def test_dossier_report_to_frontend_dict() -> None:
+    report = DossierReport(
+        summary="AI researcher at OpenAI",
+        title="Research Scientist",
+        company="OpenAI",
+        work_history=[WorkHistoryEntry(role="Researcher", company="OpenAI", period="2022-present")],
+        education=[EducationEntry(school="Stanford", degree="PhD CS")],
+        social_profiles=SocialProfiles(twitter="@alice", linkedin="linkedin.com/in/alice"),
+        conversation_hooks=["Ask about GPT-5"],
+        risk_flags=[],
+    )
+    d = report.to_frontend_dict()
+    assert d["summary"] == "AI researcher at OpenAI"
+    assert d["title"] == "Research Scientist"
+    assert d["workHistory"][0]["role"] == "Researcher"
+    assert d["education"][0]["school"] == "Stanford"
+    assert d["socialProfiles"]["twitter"] == "@alice"
+    assert d["conversationHooks"] == ["Ask about GPT-5"]
+    assert d["riskFlags"] == []
+
+
+def test_synthesis_result_with_dossier() -> None:
+    dossier = DossierReport(summary="Test summary", title="Engineer")
+    result = SynthesisResult(person_name="Bob", dossier=dossier)
+    assert result.dossier is not None
+    assert result.dossier.title == "Engineer"

@@ -7,17 +7,26 @@ from enrichment.models import EnrichmentHit, EnrichmentRequest, EnrichmentResult
 
 
 class ExaEnrichmentClient:
-    """Settings-aware seam for Exa enrichment integration.
+    """Exa API client for person enrichment lookups.
 
-    Implements the EnrichmentClient protocol from enrichment/__init__.py.
+    RESEARCH: Checked exa-py (official SDK), tavily-python, serper-dev
+    DECISION: Using exa-py — official SDK, neural search, best for person lookups
     """
 
     def __init__(self, settings: Settings):
         self._settings = settings
+        self._client = None
 
     @property
     def configured(self) -> bool:
         return bool(self._settings.exa_api_key)
+
+    def _get_client(self):
+        if self._client is None:
+            from exa_py import Exa
+
+            self._client = Exa(api_key=self._settings.exa_api_key)
+        return self._client
 
     def build_person_query(self, name: str, company: str | None = None) -> str:
         if company:
@@ -35,16 +44,50 @@ class ExaEnrichmentClient:
                 error="Exa API key not configured (EXA_API_KEY missing)",
             )
 
-        # Placeholder: real Exa call goes here
-        return EnrichmentResult(
-            query=query,
-            hits=[
-                EnrichmentHit(
-                    title=f"Result for {request.name}",
-                    url="https://example.com",
-                    snippet="Placeholder result",
-                    score=0.5,
-                    source="exa",
+        try:
+            exa = self._get_client()
+            search_query = f"{request.name}"
+            if request.company:
+                search_query += f" {request.company}"
+            if request.additional_context:
+                search_query += f" {request.additional_context}"
+
+            response = exa.search_and_contents(
+                search_query,
+                type="auto",
+                num_results=10,
+                text={"max_characters": 1000},
+                highlights=True,
+            )
+
+            hits: list[EnrichmentHit] = []
+            for result in response.results:
+                snippet = ""
+                if hasattr(result, "highlights") and result.highlights:
+                    snippet = " ... ".join(result.highlights[:3])
+                elif hasattr(result, "text") and result.text:
+                    snippet = result.text[:500]
+
+                score = result.score if hasattr(result, "score") and result.score else 0.5
+                score = max(0.0, min(1.0, score))
+
+                hits.append(
+                    EnrichmentHit(
+                        title=result.title or "",
+                        url=result.url or "",
+                        snippet=snippet or None,
+                        score=score,
+                        source="exa",
+                    )
                 )
-            ],
-        )
+
+            logger.info("Exa returned {} hits for query={}", len(hits), query)
+            return EnrichmentResult(query=query, hits=hits)
+
+        except Exception as e:
+            logger.error("Exa API call failed: {}", e)
+            return EnrichmentResult(
+                query=query,
+                success=False,
+                error=f"Exa API error: {e}",
+            )
