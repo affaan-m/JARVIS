@@ -7,47 +7,57 @@
 
 ## 0. Design Philosophy
 
-SPECTER's UI is an **FBI/COD mission briefing corkboard**. Every design decision should feel like you're looking at a classified intelligence operation in progress. Dark, gritty, analog textures overlaid with sharp digital data. Think *Homeland* season 1 meets *Call of Duty: Modern Warfare* pre-mission briefing meets *Minority Report* live feeds.
+SPECTER's UI is a **Call of Duty: Black Ops mission briefing war room**. Think the evidence board from Black Ops Cold War's safehouse — green-tinted fluorescent lighting, brick walls, military filing cabinets, classified documents pinned to a board with red string connecting targets. NOT a cozy Pinterest corkboard — this is a military intelligence operation.
+
+**Primary visual reference:** COD Black Ops Cold War "Evidence Board" — green military tint over everything, harsh fluorescent overhead lighting, brick/concrete walls, metal shelving with file boxes, photos and documents pinned with red string, maps with location markers, analog + classified aesthetic.
 
 **Core principles:**
-1. **Analog meets digital** — cork textures, paper, pins, red string, but with real-time streaming data
+1. **Military operations center** — green-tinted lighting, concrete/brick textures, metal surfaces, classified stamps, redacted text
 2. **Information density** — show a LOT of data per card, but layered (overview → click to expand)
 3. **Motion = life** — papers slide in, pins bounce, strings draw themselves, data typewriter-fills
-4. **Dark palette** — the corkboard is the only warm element; everything else is dark UI chrome
+4. **Green + dark palette** — military green tint over the board, harsh lighting contrast, no warm tones
+5. **Classified atmosphere** — [REDACTED] blocks, "TOP SECRET" stamps, file folder tabs, evidence numbering
 
 ---
 
 ## 1. Color System
 
 ```
-/* Core palette */
---bg-dark:          #0a0a0f;        /* App background — near-black with blue undertone */
---bg-chrome:        #14141f;        /* UI chrome panels */
---cork:             #c4956a;        /* Corkboard surface */
---cork-dark:        #8b6914;        /* Cork shadow/depth */
---paper:            #f5f0e8;        /* Dossier paper cards */
---paper-aged:       #e8dcc8;        /* Aged paper variant */
---paper-shadow:     rgba(0,0,0,0.3);
+/* Core palette — COD Black Ops military green */
+--bg-dark:          #0a0d08;        /* App background — near-black with green undertone */
+--bg-chrome:        #141a12;        /* UI chrome panels — dark military green */
+--board-bg:         #2a2f25;        /* Evidence board background — dark olive/concrete */
+--board-wall:       #3d3529;        /* Brick wall texture tint */
+--paper:            #d4cdb8;        /* Dossier paper — aged manila folder */
+--paper-aged:       #c4b998;        /* More aged paper variant */
+--paper-shadow:     rgba(0,0,0,0.4);
+
+/* Military green lighting overlay */
+--fluorescent:      rgba(120,180,80,0.06); /* Green fluorescent light wash */
+--fluorescent-hot:  rgba(140,200,90,0.12); /* Brighter green for focal areas */
 
 /* Accent colors */
 --red-string:       #c0392b;        /* Connection lines (THE red string) */
 --red-glow:         rgba(192,57,43,0.4);
 --pin-red:          #e74c3c;        /* Pushpin heads */
---pin-yellow:       #f39c12;        /* Alt pushpin */
---highlight-yellow: #ffeaa7;        /* Highlighter on paper */
---stamp-red:        #c0392b;        /* "CLASSIFIED" stamp */
+--pin-steel:        #7f8c8d;        /* Metal pin / thumbtack */
+--highlight-yellow: #e8d44d;        /* Highlighter on paper — harsher yellow */
+--stamp-red:        #b03020;        /* "CLASSIFIED" / "TOP SECRET" stamp — darker, more military */
+--redacted-black:   #1a1a1a;        /* [REDACTED] blocks */
 
 /* Status colors */
 --status-pending:   #f39c12;        /* Amber — identifying */
---status-active:    #3498db;        /* Blue — researching */
+--status-active:    #5dade2;        /* Light blue — researching */
 --status-complete:  #27ae60;        /* Green — dossier complete */
 --status-error:     #e74c3c;        /* Red — failed */
 
 /* Text */
---text-primary:     #1a1a2e;        /* On paper */
---text-secondary:   #4a4a5a;        /* On paper, secondary */
---text-ui:          #e0e0e0;        /* On dark chrome */
---text-ui-dim:      #888899;        /* On dark chrome, secondary */
+--text-primary:     #1a1a1a;        /* On paper — near black */
+--text-secondary:   #4a4a4a;        /* On paper, secondary */
+--text-ui:          #c8d6b0;        /* On dark chrome — greenish white */
+--text-ui-dim:      #6b7a5e;        /* On dark chrome, secondary — muted olive */
+--text-classified:  #b03020;        /* Stamp text */
+--text-redacted:    #1a1a1a;        /* Black bars over text */
 
 /* Typewriter font for dossier text */
 --font-typewriter:  'Courier Prime', 'Courier New', monospace;

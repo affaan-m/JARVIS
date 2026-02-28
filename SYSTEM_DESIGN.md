@@ -1042,3 +1042,376 @@ class Settings(BaseSettings):
 
 config = Settings()
 ```
+
+---
+
+## 9. AMBIENT INTELLIGENCE LAYER (Module: `backend/ambient/`)
+
+### 9.1 Overview
+Beyond face-based identification, SPECTER collects passive signals from the physical environment to enrich profiles and demonstrate depth. This layer runs on commodity hardware ($100 total) deployed at the hackathon venue.
+
+### 9.2 WiFi Probe Request Sniffing
+
+**Hardware:** Raspberry Pi 4 (~$45) + Alfa AWUS036ACH (~$40) in monitor mode
+**Alternative:** ESP32 Marauder (~$30) or Flipper Zero
+
+**How it works:**
+Devices constantly broadcast "probe requests" containing SSIDs of networks they've previously connected to. This reveals:
+- Home/work WiFi names (e.g., "GoogleGuest" → works at Google, "MIT" → attended MIT)
+- Hotel/airport WiFi history (travel patterns)
+- Device manufacturer from MAC OUI prefix
+
+**Implementation:**
+```python
+# backend/ambient/wifi_sniffer.py
+# RESEARCH: tshark + scapy for probe capture, WiGLE API for SSID→GPS mapping
+# DECISION: tshark CLI parsing — fastest, no Python overhead
+# ALT: scapy (pure Python, slower but more flexible)
+
+import subprocess
+import asyncio
+from typing import AsyncGenerator
+from loguru import logger
+
+async def capture_probes(interface: str = "wlan0mon") -> AsyncGenerator[dict, None]:
+    """Stream WiFi probe requests from monitor-mode interface."""
+    cmd = [
+        "tshark", "-i", interface, "-l",
+        "-Y", "wlan.fc.type_subtype == 0x04",
+        "-T", "fields",
+        "-e", "wlan.sa",              # Source MAC
+        "-e", "wlan_mgt.ssid",        # Probed SSID
+        "-e", "radiotap.dbm_antsignal" # Signal strength (proximity)
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+    async for line in proc.stdout:
+        parts = line.decode().strip().split("\t")
+        if len(parts) >= 2:
+            yield {
+                "mac": parts[0],
+                "ssid": parts[1] if parts[1] else None,
+                "signal_dbm": int(parts[2]) if len(parts) > 2 and parts[2] else None,
+                "oui_vendor": lookup_oui(parts[0][:8])
+            }
+
+async def enrich_ssid_location(ssid: str) -> dict | None:
+    """Use WiGLE API to geolocate an SSID."""
+    # WiGLE API: https://api.wigle.net/api/v2/network/search
+    # Returns GPS coordinates where this SSID has been seen
+    # Free tier: 100 queries/day
+    import aiohttp
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            "https://api.wigle.net/api/v2/network/search",
+            params={"ssid": ssid},
+            headers={"Authorization": f"Basic {config.WIGLE_API_KEY}"},
+            timeout=aiohttp.ClientTimeout(total=10)
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data.get("results"):
+                    r = data["results"][0]
+                    return {"ssid": ssid, "lat": r["trilat"], "lng": r["trilong"], "city": r.get("city")}
+    return None
+```
+
+### 9.3 BLE Device Scanning
+
+**Hardware:** Same Raspberry Pi 4 (built-in BLE) or ESP32
+
+**What it reveals:**
+- Device names ("John's AirPods Pro" → first name)
+- Apple Continuity protocol messages (device type, action state)
+- Wearable signatures (Fitbit, Garmin, Apple Watch models)
+
+```python
+# backend/ambient/ble_scanner.py
+# RESEARCH: bleak (4.5k★, async BLE library), bettercap (BLE+WiFi Swiss army knife)
+# DECISION: bleak for Python integration, bettercap as standalone backup
+
+from bleak import BleakScanner
+from loguru import logger
+
+async def scan_ble_devices(duration: float = 10.0) -> list[dict]:
+    """Scan for nearby BLE devices and extract identifying info."""
+    devices = await BleakScanner.discover(timeout=duration)
+    results = []
+    for d in devices:
+        name = d.name or ""
+        results.append({
+            "mac": d.address,
+            "name": name,
+            "rssi": d.rssi,
+            "inferred_owner": extract_owner_name(name),  # "John's AirPods" → "John"
+            "device_type": classify_device(name),         # airpods, watch, phone, etc.
+        })
+    return results
+
+def extract_owner_name(device_name: str) -> str | None:
+    """Extract owner name from device names like 'John's AirPods Pro'."""
+    import re
+    match = re.match(r"^(.+?)['']s\s+", device_name)
+    return match.group(1) if match else None
+```
+
+### 9.4 Ambient-to-Profile Correlation
+
+The ambient layer feeds into the main profile pipeline:
+1. WiFi probes → SSID analysis → workplace/school inference → add to person enrichment
+2. BLE names → owner name extraction → cross-reference with detected faces by proximity + timing
+3. Signal strength → proximity estimation → associate ambient data with nearest detected person
+
+---
+
+## 10. PUBLIC RECORDS AGENTS (Module: `backend/agents/public_records/`)
+
+### 10.1 Overview
+US public records are massive and largely free. These agents query federal/state databases to add depth no social-media-only tool can match.
+
+### 10.2 Federal Database Agents
+
+| Database | URL | Auth | What You Get |
+|----------|-----|------|-------------|
+| PACER (federal courts) | pacer.uscourts.gov | Account (free) | Federal court filings, lawsuits, bankruptcies |
+| SEC EDGAR | efts.sec.gov/LATEST/search-index | None | Public company filings, insider trades, officer listings |
+| FEC Donations | api.open.fec.gov | API key (free) | Political donations since 1977 — name, employer, amount |
+| USPTO Patents | patentsview.org/api | None | Patent filings — inventor name, company, technology |
+| SAM.gov Contracts | api.sam.gov | API key (free) | Government contracts — company, amount, scope |
+
+### 10.3 State Database Agents
+
+| Data Type | Coverage | Auth | Notes |
+|-----------|----------|------|-------|
+| Criminal Records | Per-county court sites | None/varies | Many counties have free online portals |
+| Property Records | County assessor sites | None | Name → property ownership, value, purchase price |
+| Professional Licenses | State boards | None | Doctors, lawyers, real estate agents, CPAs |
+| Voter Registration | Secretary of State | Varies by state | Name, address, party affiliation, vote history |
+| Business Registrations | Secretary of State | None | LLC/Corp filings — owner names, registered agents |
+
+### 10.4 Implementation Pattern
+
+```python
+# backend/agents/public_records/fec_agent.py
+# RESEARCH: FEC API is free, well-documented, no auth issues
+# DECISION: Direct API calls — simple REST, returns JSON
+
+import aiohttp
+from loguru import logger
+
+async def search_fec_donations(name: str, state: str = None) -> list[dict]:
+    """Search FEC for political donations by name."""
+    params = {"q": name, "sort": "-contribution_receipt_date", "per_page": 20}
+    if state:
+        params["contributor_state"] = state
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            "https://api.open.fec.gov/v1/schedules/schedule_a/",
+            params={**params, "api_key": config.FEC_API_KEY},
+            timeout=aiohttp.ClientTimeout(total=15)
+        ) as resp:
+            data = await resp.json()
+            return [{
+                "donor_name": r["contributor_name"],
+                "amount": r["contribution_receipt_amount"],
+                "date": r["contribution_receipt_date"],
+                "employer": r.get("contributor_employer"),
+                "committee": r["committee"]["name"],
+            } for r in data.get("results", [])]
+```
+
+### 10.5 Aggregator Services (Browser Use Agents)
+
+For data not available via API, use Browser Use to scrape:
+- **FastPeopleSearch** — name → address, phone, relatives, associates (free, no login)
+- **TruePeopleSearch** — similar to above
+- **Spokeo** — aggregated public records (paid, but deep)
+- **WhitePages** — address history, phone, relatives
+
+These are Browser Use agents (3-8 sec each) that fire in parallel during Tier 2 enrichment.
+
+---
+
+## 11. LIVE CAMERA FEEDS (Module: `backend/ambient/cameras/`)
+
+### 11.1 Overview
+200,000+ publicly accessible camera feeds across the US. No authentication needed for most. Useful for venue-awareness during demo (show live feeds from nearby cameras on the corkboard).
+
+### 11.2 Priority Camera APIs
+
+| Source | Cameras | Auth | Refresh | API |
+|--------|---------|------|---------|-----|
+| Caltrans CWWP2 | 1,000+ | None | 15 sec | REST/JSON |
+| NYC NYCTMC | 2,500+ | None | 2 sec | REST/JSON |
+| State 511 Systems | 25+ states | Free key | 30 sec | REST/JSON |
+| TrafficVision.Live | 135,000+ | None | Varies | Web scrape |
+
+### 11.3 Caltrans API (California DOT)
+
+```python
+# backend/ambient/cameras/caltrans.py
+# RESEARCH: Caltrans CWWP2 — free, no auth, JSON, 12 districts
+# DECISION: Direct HTTP — dead simple
+
+import aiohttp
+
+CALTRANS_BASE = "https://cwwp2.dot.ca.gov/data"
+
+async def get_caltrans_cameras(district: int = 4) -> list[dict]:
+    """Get all camera feeds for a Caltrans district. District 4 = SF Bay Area."""
+    url = f"{CALTRANS_BASE}/d{district}/cctv/cctvStatusD{district:02d}.json"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            data = await resp.json()
+            return [{
+                "id": cam["cctv"]["index"],
+                "name": cam["cctv"]["location"]["locationName"],
+                "lat": cam["cctv"]["location"]["latitude"],
+                "lng": cam["cctv"]["location"]["longitude"],
+                "image_url": f"{CALTRANS_BASE}/d{district}/cctv/image/{cam['cctv']['index']}/{cam['cctv']['index']}.jpg",
+                "direction": cam["cctv"]["location"].get("direction"),
+            } for cam in data.get("data", [])]
+```
+
+### 11.4 NYC Traffic Cameras
+
+```python
+# backend/ambient/cameras/nyc.py
+async def get_nyc_cameras() -> list[dict]:
+    """Get all NYC traffic cameras. 2500+ cameras, no auth, 2s refresh."""
+    url = "https://webcams.nyctmc.org/api/cameras"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            cameras = await resp.json()
+            return [{
+                "id": cam["id"],
+                "name": cam["name"],
+                "lat": cam["latitude"],
+                "lng": cam["longitude"],
+                "image_url": f"https://webcams.nyctmc.org/api/cameras/{cam['id']}/image",
+            } for cam in cameras]
+```
+
+### 11.5 Demo Usage
+During the live demo, show a mini-map on the corkboard with nearby camera feeds. This demonstrates environmental awareness and adds visual punch. The feeds refresh every 2-15 seconds — the judges see live images updating on the board.
+
+---
+
+## 12. EXPANDED OSINT TOOL INVENTORY
+
+### 12.1 Username Enumeration (Tier 2 Agents)
+
+| Tool | Sites | Speed | Install |
+|------|-------|-------|---------|
+| Sherlock | 400+ | ~30s | `pip install sherlock-project` |
+| Maigret | 2,500+ | ~60s | `pip install maigret` |
+| Social Analyzer | 1,000+ | ~45s | `pip install social-analyzer` |
+| Blackbird | 600+ | ~20s | `pip install blackbird` |
+
+**Strategy:** Run Sherlock (fastest) for quick results, Maigret in parallel for depth. If time permits, Social Analyzer as third pass.
+
+### 12.2 Email Intelligence
+
+| Tool | What It Does | Install |
+|------|-------------|---------|
+| Holehe | Check 120+ sites for email registration | `pip install holehe` |
+| h8mail | Email → breach data, passwords | `pip install h8mail` |
+| Hunter.io | Company email patterns + verification | API (free tier) |
+| EmailRep | Email reputation + social profiles | API (free) |
+
+### 12.3 Breach/Leak Databases
+
+| Service | Records | API | Ethical Note |
+|---------|---------|-----|-------------|
+| Have I Been Pwned | 600M+ | Free REST | Only shows breach COUNT, not data |
+| DeHashed | 7.5B+ | Paid REST | Full breach data — only show breach presence |
+| LeakCheck | 7.5B+ | Paid REST | Similar to DeHashed |
+
+**Demo framing:** "We found this person appears in 4 known data breaches" — demonstrates exposure without showing actual leaked data.
+
+### 12.4 Comprehensive OSINT Frameworks
+
+| Framework | Modules | Use Case |
+|-----------|---------|----------|
+| SpiderFoot (16k★) | 200+ | Automated full OSINT on a target |
+| theHarvester (15k★) | Email, subdomain, name harvesting | Quick surface-level recon |
+| Photon (12k★) | Web crawler extracting URLs, emails, files | Deep-crawl a person's website |
+| Osintgram (12k★) | Instagram deep analysis | Profile, posts, followers, locations |
+| CrossLinked | LinkedIn employee enumeration | Company → all employees |
+
+### 12.5 Face Search API Details
+
+| Service | API Type | Cost | Returns |
+|---------|----------|------|---------|
+| FaceCheck.ID | REST API | $0.30/search (3 credits) | Social profile URLs + similarity scores |
+| PimEyes | Commercial API / Selenium scraper | ~$30/mo | Web URLs where face appears |
+| PicImageSearch (652★) | Python lib | Free (uses Google/Yandex/Bing) | Multi-engine reverse image search |
+| Lenso.ai | Web | Free tier | Face-focused reverse search |
+| TinEye | REST API | Paid | Exact + modified image matches |
+
+---
+
+## 13. DEMO STRATEGY (From Operation Omniscience)
+
+### 13.1 Pre-Consented Volunteer Approach
+The demo subject appears to be a random person but is actually a pre-consented teammate or willing participant. This ensures:
+- Ethical compliance (informed consent)
+- Guaranteed data richness (pre-verified their profiles exist)
+- No dead spots (we know the pipeline will find them)
+
+### 13.2 Three-Minute Demo Script
+
+| Time | Action | What Judges See |
+|------|--------|----------------|
+| 0:00-0:30 | Put on glasses, look at "random" volunteer | Face detected, card spawns on corkboard with photo |
+| 0:30-1:30 | Agent swarm activates | 10+ Browser Use tabs fan out across LinkedIn, Twitter, GitHub, Google. Data streams into the card in real-time. Typewriter text effect. |
+| 1:30-2:30 | Ambient data layer | WiFi probes show network history, BLE shows devices. Public records show donations, property. Connections drawn to other people on the board. |
+| 2:30-3:00 | Pitch | "We built the world's first real-time person intelligence platform. Every data source you saw is publicly available. This is what's possible — and why privacy matters." |
+
+### 13.3 Fallback Strategy
+- **Pre-cached profiles:** 2-3 complete dossiers pre-loaded in Convex
+- **Recorded video:** Screen recording of a successful end-to-end run
+- **Staged sequence:** If live detection is slow, trigger the research manually with a pre-captured face
+
+### 13.4 Sponsor Credit Utilization
+
+| Sponsor | Credits | Usage |
+|---------|---------|-------|
+| Browser Use | $100 | Agent swarm (LinkedIn, Twitter, Google, PimEyes) |
+| Vercel V0 | $50 | Frontend component generation |
+| Convex | Free | Real-time database |
+| MongoDB | Free | Persistent storage |
+| Google DeepMind | $20 | Gemini 2.0 Flash for vision + synthesis |
+| Daytona | $100 | Cloud dev environment |
+| HUD | $200 | Multi-agent orchestration |
+| Laminar | $150 | Agent tracing + observability |
+
+---
+
+## 14. ENVIRONMENT CONFIGURATION (Updated)
+
+**Additional env vars for new modules:**
+
+```python
+# Add to backend/config.py Settings class:
+
+    # Ambient Intelligence
+    WIGLE_API_KEY: str = ""          # WiGLE SSID geolocation (free, 100/day)
+    WIFI_INTERFACE: str = "wlan0mon" # Monitor-mode WiFi interface
+
+    # Public Records
+    FEC_API_KEY: str = ""            # FEC donation search (free)
+    PACER_USERNAME: str = ""         # Federal court records
+    PACER_PASSWORD: str = ""
+
+    # Face Search
+    FACECHECK_API_KEY: str = ""      # FaceCheck.ID API ($0.30/search)
+    PIMEYES_ACCOUNTS: str = "[]"     # PimEyes account pool (JSON)
+
+    # OSINT
+    HUNTER_API_KEY: str = ""         # Hunter.io email lookup (free tier)
+    EMAILREP_API_KEY: str = ""       # EmailRep (free)
+    HIBP_API_KEY: str = ""           # Have I Been Pwned (free)
+```
