@@ -1,21 +1,46 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from loguru import logger
 
 from capture.service import CaptureService
 from config import get_settings
+from db.memory_gateway import InMemoryDatabaseGateway
+from identification.detector import MediaPipeFaceDetector
+from identification.embedder import ArcFaceEmbedder
+from pipeline import CapturePipeline
 from schemas import HealthResponse, ServiceStatus, TaskPhase
 from tasks import TASK_PHASES
 
 settings = get_settings()
-capture_service = CaptureService()
+
+# Build pipeline components
+detector = MediaPipeFaceDetector()
+embedder = ArcFaceEmbedder()
+db_gateway = InMemoryDatabaseGateway()
+pipeline = CapturePipeline(detector=detector, embedder=embedder, db=db_gateway)
+
+capture_service = CaptureService(pipeline=pipeline)
 upload_file = File(...)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    logger.info("SPECTER pipeline started — detector={} embedder={} db=in-memory",
+                detector.__class__.__name__, embedder.__class__.__name__)
+    yield
+    logger.info("SPECTER shutting down")
+
 
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     summary="Control plane and service seams for the SPECTER hackathon stack",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

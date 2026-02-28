@@ -9,9 +9,9 @@ from main import app
 client = TestClient(app)
 
 
-def test_capture_response_matches_schema_contract() -> None:
+def test_capture_response_matches_pipeline_contract() -> None:
     """Integration test: upload a file and verify the full response payload
-    matches the CaptureQueuedResponse schema contract."""
+    matches the pipeline response contract."""
     file = io.BytesIO(b"\x89PNG\r\n\x1a\n fake png header")
     response = client.post(
         "/api/capture",
@@ -22,18 +22,27 @@ def test_capture_response_matches_schema_contract() -> None:
     assert response.status_code == 200
     payload = response.json()
 
-    # All required fields present
-    assert set(payload.keys()) == {"capture_id", "filename", "content_type", "status", "source"}
+    # Required fields present
+    assert "capture_id" in payload
+    assert "filename" in payload
+    assert "content_type" in payload
+    assert "status" in payload
+    assert "source" in payload
 
     # Values match what was sent
     assert payload["filename"] == "headshot.png"
     assert payload["content_type"] == "image/png"
-    assert payload["status"] == "queued"
+    assert payload["status"] in ("processed", "error")
     assert payload["source"] == "glasses_cam"
 
     # capture_id follows expected format
     assert payload["capture_id"].startswith("cap_")
     assert len(payload["capture_id"]) == 16
+
+    # Pipeline fields present
+    assert "total_frames" in payload
+    assert "faces_detected" in payload
+    assert "persons_created" in payload
 
 
 def test_health_services_agree_with_services_endpoint() -> None:

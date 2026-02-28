@@ -9,7 +9,7 @@ from main import app
 client = TestClient(app)
 
 
-def test_capture_upload_returns_queued() -> None:
+def test_capture_upload_returns_processed() -> None:
     file = io.BytesIO(b"fake image data")
     response = client.post(
         "/api/capture",
@@ -18,7 +18,7 @@ def test_capture_upload_returns_queued() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "queued"
+    assert payload["status"] in ("processed", "error")
     assert payload["filename"] == "test.jpg"
     assert payload["content_type"] == "image/jpeg"
 
@@ -85,3 +85,19 @@ def test_capture_upload_video_file() -> None:
     payload = response.json()
     assert payload["filename"] == "clip.mp4"
     assert payload["content_type"] == "video/mp4"
+
+
+def test_capture_upload_includes_pipeline_fields() -> None:
+    file = io.BytesIO(b"fake image data")
+    response = client.post(
+        "/api/capture",
+        files={"file": ("test.jpg", file, "image/jpeg")},
+    )
+
+    payload = response.json()
+    assert "total_frames" in payload
+    assert "faces_detected" in payload
+    assert "persons_created" in payload
+    assert isinstance(payload["total_frames"], int)
+    assert isinstance(payload["faces_detected"], int)
+    assert isinstance(payload["persons_created"], list)
