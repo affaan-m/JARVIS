@@ -1,0 +1,148 @@
+@import "tailwindcss";
+
+:root {
+  /* COD Black Ops Military Palette */
+  --bg-dark: #0a0d08;
+  --bg-chrome: #141a12;
+  --bg-panel: #1a2018;
+  --board-bg: #2a2f25;
+  --board-surface: #353a30;
+
+  /* Fluorescent lighting effect */
+  --fluorescent: rgba(120, 180, 80, 0.06);
+  --fluorescent-strong: rgba(120, 180, 80, 0.12);
+
+  /* Text */
+  --text-primary: #e8f0d8;
+  --text-ui: #c8d6b0;
+  --text-dim: #6b7a58;
+
+  /* Accents */
+  --accent-red: #c0392b;
+  --stamp-red: #b03020;
+  --string-red: #e74c3c;
+  --pin-gold: #d4a017;
+  --alert-amber: #f39c12;
+  --intel-green: #4a7c3f;
+
+  /* Status */
+  --status-pending: #f39c12;
+  --status-researching: #3498db;
+  --status-complete: #4a7c3f;
+  --status-failed: #c0392b;
+
+  /* Redacted */
+  --redacted-black: #1a1a1a;
+
+  /* Fonts */
+  --font-heading: var(--font-bebas), "Bebas Neue", sans-serif;
+  --font-mono: var(--font-courier), "Courier Prime", monospace;
+  --font-body: var(--font-inter), "Inter", sans-serif;
+
+  --background: var(--bg-dark);
+  --foreground: var(--text-ui);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background: var(--bg-dark);
+  color: var(--text-ui);
+  font-family: var(--font-body);
+  overflow: hidden;
+  height: 100vh;
+}
+
+/* Fluorescent light overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    var(--fluorescent-strong) 0%,
+    transparent 60%
+  );
+  pointer-events: none;
+  z-index: 1000;
+}
+
+/* Scanline effect */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 1001;
+}
+
+/* Classified stamp text */
+.classified-stamp {
+  font-family: var(--font-heading);
+  color: var(--stamp-red);
+  border: 3px solid var(--stamp-red);
+  padding: 4px 16px;
+  text-transform: uppercase;
+  letter-spacing: 4px;
+  transform: rotate(-8deg);
+  opacity: 0.8;
+}
+
+/* Typewriter text animation */
+@keyframes typewriter {
+  from { width: 0; }
+  to { width: 100%; }
+}
+
+.typewriter {
+  overflow: hidden;
+  white-space: nowrap;
+  animation: typewriter 0.8s steps(30) forwards;
+}
+
+/* Redacted text block */
+.redacted {
+  background: var(--redacted-black);
+  color: var(--redacted-black);
+  padding: 0 4px;
+  user-select: none;
+}
+
+/* Glowing red string */
+.string-glow {
+  filter: drop-shadow(0 0 4px rgba(231, 76, 60, 0.5));
+}
+
+/* Card paper texture */
+.paper-texture {
+  background: linear-gradient(
+    135deg,
+    #d4cfc4 0%,
+    #e8e2d6 25%,
+    #d9d3c7 50%,
+    #e2dcd0 75%,
+    #d4cfc4 100%
+  );
+}
+
+/* Status pulse animation */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.status-pulse {
+  animation: pulse-glow 2s ease-in-out infinite;
+}

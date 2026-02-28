@@ -13,14 +13,14 @@
   - Verify with `npx convex dev` — should deploy without errors
   - **Acceptance:** Can create + query a person from Convex dashboard
 
-- [ ] **T02: FastAPI skeleton**
+- [x] **T02: FastAPI skeleton**
   - `pip install fastapi uvicorn python-dotenv pydantic-settings`
   - Create `backend/main.py` with `/api/health`, `/api/capture` stubs
   - Create `backend/config.py` with Settings class (see SYSTEM_DESIGN.md §8)
   - Create `.env` from `.env.example`
   - **Acceptance:** `uvicorn main:app --reload` starts, `/api/health` returns OK
 
-- [ ] **T03: Next.js project setup**
+- [x] **T03: Next.js project setup**
   - `npx create-next-app frontend --typescript --tailwind --app`
   - Install: `framer-motion`, `convex`, `@use-gesture/react`, `lucide-react`
   - Add Google Fonts (Bebas Neue, Courier Prime, Inter) to layout.tsx
