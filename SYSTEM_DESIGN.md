@@ -1,7 +1,7 @@
 # SPECTER — Detailed System Design & Implementation Manual
 ## For Coding Agent Handoff
 
-**Version:** 0.2 | **Date:** 2026-02-28 | **Status:** READY TO BUILD
+**Version:** 0.3 | **Date:** 2026-02-28 | **Status:** READY TO BUILD
 
 ---
 
@@ -11,9 +11,11 @@
 |----------|--------|-----------|
 | Vision/OCR Model | **Gemini 2.0 Flash** | 25x cheaper than GPT-4o, 2x faster, excellent screenshot parsing |
 | Synthesis LLM | **Gemini 2.0 Flash** | Same model, cheap enough for bulk synthesis |
-| Facial Recognition | **PimEyes via Browser Use** | No practical API; browser automation required |
-| Capture Device | **Meta Ray-Ban Gen 2** | Video capture → ffmpeg frame extraction |
-| Capture Pipeline | **Simple pipeline (NOT agentic)** | ffmpeg → Gemini API → POST to backend. No agent framework needed. |
+| Glasses Streaming | **VisionClaw (fork)** | 1.4k★, Feb 2026, already solves Ray-Ban→cloud streaming + Gemini Live |
+| Facial Recognition | **PimEyes via Browser Use + PicImageSearch fallback** | PimEyes for faces, PicImageSearch for multi-engine reverse search |
+| Face Detection | **mediapipe + InsightFace/ArcFace embeddings** | mediapipe fast detect, ArcFace 512-dim embeddings for matching |
+| Capture Device | **Meta Ray-Ban Gen 2 via VisionClaw** | VisionClaw handles streaming; phone camera fallback built-in |
+| Capture Pipeline | **VisionClaw streaming → face detect → identify** | Fork VisionClaw, add face pipeline layer. NOT building from scratch. |
 | LinkedIn Extraction | **Browser Use + Voyager API interception** | 2-5 sec/profile, fastest zero-cost option |
 | X/Twitter Extraction | **Reverse GraphQL (twscrape)** | 2-5 sec/profile, free, actively maintained |
 | Instagram Extraction | **Browser Use scrape public profiles** | 20-40 sec/profile, no API available |
