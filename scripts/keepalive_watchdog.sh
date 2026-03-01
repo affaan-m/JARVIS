@@ -11,7 +11,7 @@
 # =============================================================================
 
 SANDBOX_ID="human-detection-persistent"
-SANDBOX_URL="https://8765-mvlda1vi7dtbjrbz.proxy.daytona.works/api/health"
+SANDBOX_URL="https://8765-lmj1waztb18al1vu.proxy.daytona.works/api/health"
 SIGNAL_URL="https://visionclaw-signal.fly.dev/"
 FLY_APP="visionclaw-signal"
 LOG_FILE="/tmp/specter-watchdog.log"

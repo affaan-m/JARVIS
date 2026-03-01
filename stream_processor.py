@@ -14,6 +14,7 @@ Endpoints:
 """
 
 import asyncio
+import logging
 import os
 import struct
 import time
@@ -22,10 +23,23 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+
+# ---------------------------------------------------------------------------
+# Logging setup
+# ---------------------------------------------------------------------------
+LOG_FORMAT = "[%(asctime)s] %(levelname)s %(message)s"
+LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
+
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, datefmt=LOG_DATEFMT)
+logger = logging.getLogger("stream_processor")
+
+_file_handler = logging.FileHandler("/tmp/server-app.log")
+_file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT))
+logger.addHandler(_file_handler)
 
 # CPU threading optimizations — 1 thread avoids context-switch overhead on 1-vCPU
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -56,6 +70,12 @@ mjpeg_client_count: int = 0  # Only generate annotated frames when > 0
 DETECT_EVERY_N = 2  # Run YOLO every 2nd frame
 _cached_detections: dict = {"detections": [], "frame_width": 0, "frame_height": 0, "process_time_ms": 0, "skipped": False}
 _frame_counter: int = 0
+
+# Stats tracking
+_server_start_time: float = 0.0
+_total_frames_processed: int = 0
+_total_process_time_ms: float = 0.0
+_active_ws_connections: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -207,19 +227,36 @@ def _generate_mjpeg_frame(frame, boxes, person_count: int):
 # ---------------------------------------------------------------------------
 # Lifespan: load model once
 # ---------------------------------------------------------------------------
+async def _periodic_stats():
+    """Log server stats every 60 seconds."""
+    while True:
+        await asyncio.sleep(60)
+        avg_ms = (
+            round(_total_process_time_ms / _total_frames_processed, 1)
+            if _total_frames_processed > 0
+            else 0
+        )
+        uptime = round(time.time() - _server_start_time)
+        logger.info(
+            "Stats: frames=%d avg_ms=%.1f ws_conns=%d mjpeg_clients=%d uptime=%ds",
+            _total_frames_processed, avg_ms, _active_ws_connections, mjpeg_client_count, uptime,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global yolo_model
-    print("[StreamProcessor] Loading YOLO model...")
+    global yolo_model, _server_start_time
+    _server_start_time = time.time()
+    logger.info("Loading YOLO model...")
     t0 = time.time()
 
     from ultralytics import YOLO
 
     if ONNX_WEIGHTS.exists():
-        print(f"[StreamProcessor] Using ONNX weights: {ONNX_WEIGHTS}")
+        logger.info("Using ONNX weights: %s", ONNX_WEIGHTS)
         yolo_model = YOLO(str(ONNX_WEIGHTS), task="detect")
     elif PT_WEIGHTS.exists():
-        print(f"[StreamProcessor] ONNX not found, using PyTorch: {PT_WEIGHTS}")
+        logger.info("ONNX not found, using PyTorch: %s", PT_WEIGHTS)
         yolo_model = YOLO(str(PT_WEIGHTS))
     else:
         raise FileNotFoundError("No YOLO weights found (yolo11n.onnx or yolo11n.pt)")
@@ -228,9 +265,12 @@ async def lifespan(app: FastAPI):
     dummy = np.zeros((INPUT_SIZE, INPUT_SIZE, 3), dtype=np.uint8)
     yolo_model.track(dummy, classes=[0], conf=CONF_THRESHOLD, persist=True, verbose=False)
 
-    print(f"[StreamProcessor] Model loaded in {time.time() - t0:.1f}s")
+    logger.info("Model loaded in %.1fs (input_size=%d, conf=%.2f)", time.time() - t0, INPUT_SIZE, CONF_THRESHOLD)
+
+    stats_task = asyncio.create_task(_periodic_stats())
     yield
-    print("[StreamProcessor] Shutdown complete")
+    stats_task.cancel()
+    logger.info("Shutdown complete")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -241,6 +281,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    t0 = time.time()
+    response = await call_next(request)
+    duration_ms = round((time.time() - t0) * 1000, 1)
+    # Skip noisy health checks from watchdog
+    if request.url.path != "/api/health":
+        logger.info("%s %s %d %.1fms", request.method, request.url.path, response.status_code, duration_ms)
+    return response
+
 
 STATIC_DIR.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -310,10 +361,13 @@ async def mjpeg_stream():
 # ---------------------------------------------------------------------------
 @app.websocket("/ws/process")
 async def ws_process(websocket: WebSocket):
-    global mjpeg_frame, mjpeg_frame_id
+    global mjpeg_frame, mjpeg_frame_id, _active_ws_connections
 
     await websocket.accept()
-    print("[WS /ws/process] Client connected")
+    _active_ws_connections += 1
+    connect_time = time.time()
+    frame_count = 0
+    logger.info("[WS /ws/process] Client connected (active=%d)", _active_ws_connections)
 
     latest_frame: asyncio.Queue = asyncio.Queue(maxsize=1)
 
@@ -333,7 +387,8 @@ async def ws_process(websocket: WebSocket):
             pass
 
     async def processor():
-        global mjpeg_frame, mjpeg_frame_id
+        nonlocal frame_count
+        global mjpeg_frame, mjpeg_frame_id, _total_frames_processed, _total_process_time_ms
         try:
             while True:
                 jpeg_bytes = await latest_frame.get()
@@ -342,6 +397,9 @@ async def ws_process(websocket: WebSocket):
                     process_and_annotate, jpeg_bytes
                 )
                 process_ms = round((time.time() - t0) * 1000, 1)
+                frame_count += 1
+                _total_frames_processed += 1
+                _total_process_time_ms += process_ms
 
                 mjpeg_frame = annotated_jpeg
                 mjpeg_frame_id += 1
@@ -354,7 +412,7 @@ async def ws_process(websocket: WebSocket):
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            print(f"[WS /ws/process] Processor error: {e}")
+            logger.error("[WS /ws/process] Processor error: %s", e)
 
     reader_task = asyncio.create_task(reader())
     processor_task = asyncio.create_task(processor())
@@ -370,7 +428,9 @@ async def ws_process(websocket: WebSocket):
         reader_task.cancel()
         processor_task.cancel()
 
-    print("[WS /ws/process] Client disconnected")
+    _active_ws_connections -= 1
+    duration = round(time.time() - connect_time, 1)
+    logger.info("[WS /ws/process] Client disconnected (frames=%d, duration=%.1fs, active=%d)", frame_count, duration, _active_ws_connections)
 
 
 # ---------------------------------------------------------------------------
@@ -379,8 +439,12 @@ async def ws_process(websocket: WebSocket):
 # ---------------------------------------------------------------------------
 @app.websocket("/ws/detect")
 async def ws_detect(websocket: WebSocket):
+    global _active_ws_connections, _total_frames_processed, _total_process_time_ms
     await websocket.accept()
-    print("[WS /ws/detect] Client connected")
+    _active_ws_connections += 1
+    connect_time = time.time()
+    frame_count = 0
+    logger.info("[WS /ws/detect] Client connected (active=%d)", _active_ws_connections)
 
     # Request-response flow: client sends frame, waits for response, then sends next
     try:
@@ -388,14 +452,20 @@ async def ws_detect(websocket: WebSocket):
             jpeg_bytes = await websocket.receive_bytes()
             t0 = time.time()
             result = await asyncio.to_thread(process_frame_json, jpeg_bytes)
-            result["process_time_ms"] = round((time.time() - t0) * 1000, 1)
+            process_ms = round((time.time() - t0) * 1000, 1)
+            result["process_time_ms"] = process_ms
+            frame_count += 1
+            _total_frames_processed += 1
+            _total_process_time_ms += process_ms
             await websocket.send_json(result)
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        print(f"[WS /ws/detect] Error: {e}")
+        logger.error("[WS /ws/detect] Error: %s", e)
 
-    print("[WS /ws/detect] Client disconnected")
+    _active_ws_connections -= 1
+    duration = round(time.time() - connect_time, 1)
+    logger.info("[WS /ws/detect] Client disconnected (frames=%d, duration=%.1fs, active=%d)", frame_count, duration, _active_ws_connections)
 
 
 # ---------------------------------------------------------------------------
@@ -403,10 +473,15 @@ async def ws_detect(websocket: WebSocket):
 # ---------------------------------------------------------------------------
 @app.get("/api/health")
 async def health():
+    uptime = round(time.time() - _server_start_time) if _server_start_time else 0
     return {
         "status": "ok",
         "model_loaded": yolo_model is not None,
         "weights": "onnx" if ONNX_WEIGHTS.exists() and yolo_model is not None else "pt",
+        "ws_connections": _active_ws_connections,
+        "mjpeg_clients": mjpeg_client_count,
+        "total_frames": _total_frames_processed,
+        "uptime_seconds": uptime,
     }
 
 

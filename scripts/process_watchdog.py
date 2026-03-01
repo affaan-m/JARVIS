@@ -22,6 +22,7 @@ SIGNAL_URL = "https://visionclaw-signal.fly.dev/"
 CHECK_INTERVAL = 10  # seconds between uvicorn health checks
 SIGNAL_PING_INTERVAL = 30  # seconds between signal server pings
 HEARTBEAT_INTERVAL = 300  # 5 minutes between heartbeat log entries
+LOG_MAX_BYTES = 1_000_000  # 1 MB max log size
 
 
 def log(msg):
@@ -33,6 +34,42 @@ def log(msg):
             f.write(line + "\n")
     except Exception:
         pass
+
+
+def rotate_log():
+    """Truncate log file if it exceeds LOG_MAX_BYTES by keeping the last half."""
+    try:
+        if not os.path.exists(WATCHDOG_LOG):
+            return
+        size = os.path.getsize(WATCHDOG_LOG)
+        if size <= LOG_MAX_BYTES:
+            return
+        # Keep the last half of the file
+        with open(WATCHDOG_LOG, "r") as f:
+            f.seek(size // 2)
+            f.readline()  # skip partial line
+            remaining = f.read()
+        with open(WATCHDOG_LOG, "w") as f:
+            f.write("--- log rotated ---\n")
+            f.write(remaining)
+        log("Log rotated (was %d bytes)" % size)
+    except Exception:
+        pass
+
+
+def get_proxy_url():
+    """Try to get the current Daytona proxy URL."""
+    try:
+        result = subprocess.run(
+            ["daytona", "preview-url", "8765"],
+            capture_output=True, text=True, timeout=10,
+        )
+        url = result.stdout.strip()
+        if url and url.startswith("http"):
+            return url
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        pass
+    return None
 
 
 def write_pid():
@@ -118,7 +155,16 @@ def main():
     sys.stderr = open(os.devnull, "w")
 
     write_pid()
+    start_time = time.time()
     log("Watchdog started (PID %d)" % os.getpid())
+
+    # Log the current proxy URL on startup
+    proxy_url = get_proxy_url()
+    if proxy_url:
+        log("Proxy URL: %s" % proxy_url)
+    else:
+        log("Proxy URL: could not detect (daytona CLI not available or failed)")
+    last_known_proxy = proxy_url
 
     # Ignore SIGHUP so we survive terminal close
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
@@ -126,6 +172,8 @@ def main():
     proc = None
     last_signal_ping = 0
     last_heartbeat = 0
+    last_log_rotate_check = 0
+    signal_was_ok = True  # Track state for change-only logging
 
     while True:
         now = time.time()
@@ -150,17 +198,35 @@ def main():
             else:
                 log("Server still unhealthy after restart — will retry next cycle")
 
-        # --- Signal server ping ---
+        # --- Signal server ping (only log on state change) ---
         if now - last_signal_ping >= SIGNAL_PING_INTERVAL:
             ok = ping_signal_server()
-            if not ok:
-                log("Signal server ping failed")
+            if not ok and signal_was_ok:
+                log("Signal server ping FAILED (was OK)")
+            elif ok and not signal_was_ok:
+                log("Signal server ping recovered (was failing)")
+            signal_was_ok = ok
             last_signal_ping = now
 
-        # --- Heartbeat ---
+        # --- Heartbeat with uptime ---
         if now - last_heartbeat >= HEARTBEAT_INTERVAL:
-            log("Heartbeat — watchdog alive, uvicorn healthy=%s" % is_server_healthy())
+            uptime_min = round((now - start_time) / 60, 1)
+            log("Heartbeat — uptime=%.1fmin uvicorn_healthy=%s signal_ok=%s" % (
+                uptime_min, is_server_healthy(), signal_was_ok))
             last_heartbeat = now
+
+        # --- Log rotation check (every 5 minutes) ---
+        if now - last_log_rotate_check >= 300:
+            rotate_log()
+            last_log_rotate_check = now
+
+        # --- Proxy URL change detection (every heartbeat) ---
+        if now - last_heartbeat < CHECK_INTERVAL:  # runs right after heartbeat
+            new_proxy = get_proxy_url()
+            if new_proxy and last_known_proxy and new_proxy != last_known_proxy:
+                log("WARNING: Proxy URL changed! old=%s new=%s" % (last_known_proxy, new_proxy))
+            if new_proxy:
+                last_known_proxy = new_proxy
 
         time.sleep(CHECK_INTERVAL)
 
