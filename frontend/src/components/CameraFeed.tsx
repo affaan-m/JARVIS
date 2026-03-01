@@ -20,7 +20,7 @@ interface CameraFeedProps {
 function RoomCodeInput({ onSubmit }: { onSubmit: (code: string) => void }) {
   const [code, setCode] = useState("");
   const [hovered, setHovered] = useState(false);
-  const enabled = code.length === 6;
+  const enabled = code.length >= 1;
   return (
     <div style={{
       position: "absolute", bottom: 6, left: 8, right: 8,
@@ -28,9 +28,9 @@ function RoomCodeInput({ onSubmit }: { onSubmit: (code: string) => void }) {
     }}>
       <input
         value={code}
-        onChange={e => setCode(e.target.value.toUpperCase().slice(0, 6))}
-        placeholder="ROOM"
-        maxLength={6}
+        onChange={e => setCode(e.target.value.toUpperCase().slice(0, 12))}
+        placeholder="ROOM CODE"
+        maxLength={12}
         style={{
           flex: 1, padding: "3px 6px",
           background: "rgba(0,0,0,.5)", border: "1px solid rgba(120,180,80,.2)",
@@ -38,7 +38,7 @@ function RoomCodeInput({ onSubmit }: { onSubmit: (code: string) => void }) {
           fontSize: 9, fontFamily: "monospace", letterSpacing: ".15em",
           outline: "none", textTransform: "uppercase",
         }}
-        onKeyDown={e => { if (e.key === "Enter" && code.length === 6) onSubmit(code); }}
+        onKeyDown={e => { if (e.key === "Enter" && enabled) onSubmit(code); }}
       />
       <button
         onClick={() => enabled && onSubmit(code)}
@@ -82,19 +82,18 @@ export function CameraFeed({ videoRef, status, onConnect, onDisconnect, error, d
       boxShadow: "0 2px 12px rgba(0,0,0,.4)",
       pointerEvents: "auto",
     }}>
-      {/* Live video stream */}
-      {isLive && (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          style={{
-            position: "absolute", inset: 0,
-            width: "100%", height: "100%", objectFit: "cover",
-          }}
-        />
-      )}
+      {/* Video element — always in DOM so ref is valid when ontrack fires */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        style={{
+          position: "absolute", inset: 0,
+          width: "100%", height: "100%", objectFit: "cover",
+          display: isLive ? "block" : "none",
+        }}
+      />
 
       {/* Disconnected placeholder */}
       {status === "disconnected" && (
