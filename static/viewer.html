@@ -60,14 +60,26 @@
     max-width: 720px;
     width: 100%;
   }
-  #annotatedView {
+  /* Live video is now the primary display */
+  .video-container video {
     width: 100%;
     background: #111;
     border-radius: 8px;
     border: 1px solid #222;
+    display: block;
   }
-  canvas { display: none; }
-  video { display: none; }
+  /* Canvas overlay for detection boxes */
+  #overlayCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    display: block;
+  }
+  /* Hidden capture canvas */
+  #captureCanvas { display: none; }
   .hud {
     display: flex;
     gap: 20px;
@@ -128,18 +140,19 @@
 </div>
 
 <div class="video-container">
-  <img id="annotatedView" alt="Annotated feed">
+  <!-- Live video (glasses or webcam) — primary display -->
+  <video id="liveVideo" autoplay playsinline muted></video>
+  <!-- Canvas overlay for detection boxes -->
+  <canvas id="overlayCanvas"></canvas>
 </div>
 
 <div class="hud">
-  <div>Process: <span id="hudMs">—</span> ms</div>
+  <div>Detect: <span id="hudMs">—</span> ms</div>
   <div>People: <span id="hudPeople">0</span></div>
   <div>FPS: <span id="hudFps">—</span></div>
 </div>
 
-<!-- Hidden elements for video capture -->
-<video id="remoteVideo" autoplay playsinline muted></video>
-<video id="webcamVideo" autoplay playsinline muted></video>
+<!-- Hidden capture canvas for JPEG encoding -->
 <canvas id="captureCanvas"></canvas>
 
 <script>
@@ -148,27 +161,33 @@
 // ---------------------------------------------------------------------------
 const SIGNAL_HOST = 'visionclaw-signal.fly.dev';
 const SIGNAL_PASSWORD = 'VCLAW1';
-// Use URL-embedded creds for WebSocket (browser sends Basic auth on upgrade)
 const SIGNAL_URL = `wss://:${SIGNAL_PASSWORD}@${SIGNAL_HOST}`;
 const TURN_URL = `https://${SIGNAL_HOST}/api/turn`;
-const CAPTURE_FPS = 10;
+const CAPTURE_WIDTH = 320;  // Match server INPUT_SIZE for minimal bandwidth
+const JPEG_QUALITY = 0.4;   // Detection-quality, not display quality
 
-let source = 'glasses';     // 'glasses' | 'webcam'
-let ws = null;               // WebSocket to /ws/process
-let sigWs = null;            // WebSocket to VisionClaw signaling
-let pc = null;               // RTCPeerConnection
-let captureInterval = null;
+let source = 'glasses';
+let ws = null;               // WebSocket to /ws/detect (JSON)
+let sigWs = null;
+let pc = null;
 let webcamStream = null;
+let pendingFrame = false;    // Flow control: true while waiting for server response
+
+// FPS tracking
 let fpsFrames = 0;
 let fpsLast = performance.now();
 
-const roomInput     = document.getElementById('roomCode');
-const btnConnect    = document.getElementById('btnConnect');
-const annotatedView = document.getElementById('annotatedView');
-const remoteVideo   = document.getElementById('remoteVideo');
-const webcamVideo   = document.getElementById('webcamVideo');
-const canvas        = document.getElementById('captureCanvas');
-const ctx           = canvas.getContext('2d');
+// Box interpolation state
+let prevBoxes = [];          // Previous detection boxes (normalized coords)
+let targetBoxes = [];        // Target detection boxes to interpolate toward
+let lastDetectTime = 0;      // Timestamp of last detection response
+let detectInterval = 200;    // Estimated ms between detections (adapts)
+
+const liveVideo     = document.getElementById('liveVideo');
+const overlayCanvas = document.getElementById('overlayCanvas');
+const overlayCtx    = overlayCanvas.getContext('2d');
+const captureCanvas = document.getElementById('captureCanvas');
+const captureCtx    = captureCanvas.getContext('2d');
 const statusEl      = document.getElementById('status');
 const hudMs         = document.getElementById('hudMs');
 const hudPeople     = document.getElementById('hudPeople');
@@ -183,23 +202,22 @@ function setSource(s) {
   document.getElementById('btnWebcam').classList.toggle('active', s === 'webcam');
   document.getElementById('glassesControls').style.display = s === 'glasses' ? 'flex' : 'none';
   document.getElementById('webcamControls').style.display = s === 'webcam' ? 'flex' : 'none';
-  // Cleanup the other source
   if (s === 'glasses') stopWebcam();
   if (s === 'webcam') disconnectGlasses();
 }
 
 // ---------------------------------------------------------------------------
-// WebSocket to server /ws/process
+// WebSocket to /ws/detect (JSON detections)
 // ---------------------------------------------------------------------------
 function ensureWS() {
   if (ws && ws.readyState === WebSocket.OPEN) return Promise.resolve(ws);
   return new Promise((resolve, reject) => {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/ws/process`);
+    ws = new WebSocket(`${proto}://${location.host}/ws/detect`);
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
-      console.log('[WS] Connected to /ws/process');
+      console.log('[WS] Connected to /ws/detect');
       resolve(ws);
     };
     ws.onerror = (e) => {
@@ -209,85 +227,157 @@ function ensureWS() {
     ws.onclose = () => {
       console.log('[WS] Disconnected');
       ws = null;
+      pendingFrame = false;
     };
     ws.onmessage = (evt) => {
-      // Binary: 4 bytes float process_ms + 4 bytes uint32 detections + JPEG
-      const buf = evt.data;
-      const view = new DataView(buf);
-      const processMs = view.getFloat32(0, true);
-      const detections = view.getUint32(4, true);
+      const result = JSON.parse(evt.data);
+      pendingFrame = false;
 
-      const jpegBlob = new Blob([buf.slice(8)], { type: 'image/jpeg' });
-      const url = URL.createObjectURL(jpegBlob);
-      const oldSrc = annotatedView.src;
-      annotatedView.src = url;
-      if (oldSrc && oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc);
+      // Update HUD
+      hudMs.textContent = result.process_time_ms.toFixed(0);
+      hudPeople.textContent = result.detections.length;
 
-      hudMs.textContent = processMs.toFixed(0);
-      hudPeople.textContent = detections;
+      // Update detection targets for interpolation
+      const now = performance.now();
+      if (lastDetectTime > 0) {
+        detectInterval = now - lastDetectTime;
+      }
+      lastDetectTime = now;
+
+      // Shift current interpolated boxes to prev, set new targets
+      prevBoxes = getCurrentInterpolatedBoxes();
+      targetBoxes = result.detections;
 
       // FPS counter
       fpsFrames++;
-      const now = performance.now();
       if (now - fpsLast >= 1000) {
         hudFps.textContent = (fpsFrames / ((now - fpsLast) / 1000)).toFixed(1);
         fpsFrames = 0;
         fpsLast = now;
       }
+
+      // Flow control: send next frame immediately after receiving response
+      sendFrame();
     };
   });
 }
 
 // ---------------------------------------------------------------------------
-// Frame capture: grab video frame -> JPEG -> send over WS
+// Frame capture + send (request-response flow control)
 // ---------------------------------------------------------------------------
-function startCapture(videoEl) {
-  stopCapture();
-  captureInterval = setInterval(async () => {
-    if (!videoEl.videoWidth || !videoEl.videoHeight) return;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+function sendFrame() {
+  if (pendingFrame) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!liveVideo.videoWidth || !liveVideo.videoHeight) return;
 
-    canvas.width = videoEl.videoWidth;
-    canvas.height = videoEl.videoHeight;
-    ctx.drawImage(videoEl, 0, 0);
-    canvas.toBlob((blob) => {
-      if (blob && ws && ws.readyState === WebSocket.OPEN) {
-        blob.arrayBuffer().then(buf => ws.send(buf));
-      }
-    }, 'image/jpeg', 0.7);
-  }, 1000 / CAPTURE_FPS);
+  // Scale to CAPTURE_WIDTH to reduce JPEG size and match server input
+  const aspect = liveVideo.videoHeight / liveVideo.videoWidth;
+  captureCanvas.width = CAPTURE_WIDTH;
+  captureCanvas.height = Math.round(CAPTURE_WIDTH * aspect);
+  captureCtx.drawImage(liveVideo, 0, 0, captureCanvas.width, captureCanvas.height);
+
+  captureCanvas.toBlob((blob) => {
+    if (blob && ws && ws.readyState === WebSocket.OPEN) {
+      pendingFrame = true;
+      blob.arrayBuffer().then(buf => ws.send(buf));
+    }
+  }, 'image/jpeg', JPEG_QUALITY);
 }
 
-function stopCapture() {
-  if (captureInterval) {
-    clearInterval(captureInterval);
-    captureInterval = null;
+// Kick off the first frame once video is playing
+function startDetectionLoop() {
+  // Send first frame to start the request-response chain
+  sendFrame();
+  // Also set a safety interval in case a response is dropped
+  setInterval(() => {
+    if (!pendingFrame) sendFrame();
+  }, 2000);
+}
+
+// ---------------------------------------------------------------------------
+// Box interpolation + canvas overlay (smooth 30+ FPS perceived)
+// ---------------------------------------------------------------------------
+function getCurrentInterpolatedBoxes() {
+  if (targetBoxes.length === 0) return [];
+  if (prevBoxes.length === 0) return targetBoxes;
+
+  const elapsed = performance.now() - lastDetectTime;
+  const t = Math.min(elapsed / detectInterval, 1.0);
+
+  return targetBoxes.map((target, i) => {
+    const prev = prevBoxes[i] || target;
+    // Match by name (tracking ID) if possible
+    const matched = prevBoxes.find(b => b.name === target.name) || prev;
+    return {
+      x1: matched.x1 + (target.x1 - matched.x1) * t,
+      y1: matched.y1 + (target.y1 - matched.y1) * t,
+      x2: matched.x2 + (target.x2 - matched.x2) * t,
+      y2: matched.y2 + (target.y2 - matched.y2) * t,
+      name: target.name,
+      confidence: target.confidence,
+      color: target.color,
+    };
+  });
+}
+
+function drawOverlay() {
+  // Sync canvas resolution to video display size
+  const rect = liveVideo.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) {
+    requestAnimationFrame(drawOverlay);
+    return;
   }
+  overlayCanvas.width = rect.width;
+  overlayCanvas.height = rect.height;
+
+  overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+  const boxes = getCurrentInterpolatedBoxes();
+  const w = overlayCanvas.width;
+  const h = overlayCanvas.height;
+
+  for (const box of boxes) {
+    const x1 = box.x1 * w;
+    const y1 = box.y1 * h;
+    const x2 = box.x2 * w;
+    const y2 = box.y2 * h;
+
+    // Box outline
+    overlayCtx.strokeStyle = box.color || '#00FF00';
+    overlayCtx.lineWidth = 2;
+    overlayCtx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+
+    // Label background
+    const label = `${box.name} ${(box.confidence * 100).toFixed(0)}%`;
+    overlayCtx.font = '14px SF Mono, Fira Code, monospace';
+    const metrics = overlayCtx.measureText(label);
+    const labelH = 20;
+    overlayCtx.fillStyle = box.color || '#00FF00';
+    overlayCtx.fillRect(x1, y1 - labelH, metrics.width + 8, labelH);
+
+    // Label text
+    overlayCtx.fillStyle = '#000000';
+    overlayCtx.fillText(label, x1 + 4, y1 - 5);
+  }
+
+  requestAnimationFrame(drawOverlay);
 }
+
+// Start the animation loop
+requestAnimationFrame(drawOverlay);
 
 // ---------------------------------------------------------------------------
 // Glasses mode: VisionClaw WebRTC signaling
-//
-// Protocol (viewer = us = ANSWERER):
-//   Client->Server: {type:'join', room:'ABCDEF'}
-//   Server->Client: {type:'room_joined'}
-//   Server->Client: {type:'peer_joined'}   — glasses connected
-//   Server->Client: {type:'offer', sdp:'...'} — glasses send offer
-//   Client->Server: {type:'answer', sdp:'...'} — we send answer
-//   Client->Server: {type:'candidate', candidate:'...', sdpMid:'...', sdpMLineIndex:N}
-//   Server->Client: {type:'candidate', candidate:'...', sdpMid:'...', sdpMLineIndex:N}
-//   Server->Client: {type:'peer_left'}
-//   Server->Client: {type:'error', message:'...'}
 // ---------------------------------------------------------------------------
 async function connectGlasses() {
-  const room = roomInput.value.trim();
+  const room = document.getElementById('roomCode').value.trim();
   if (!room) { alert('Enter a room code'); return; }
 
+  const btnConnect = document.getElementById('btnConnect');
   btnConnect.disabled = true;
   setStatus('connecting', 'Connecting to glasses...');
 
   try {
-    // 1. Get TURN credentials (with Basic Auth)
     let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
     try {
       const turnResp = await fetch(TURN_URL, {
@@ -301,21 +391,17 @@ async function connectGlasses() {
       console.warn('[TURN] Failed to fetch, using STUN only:', e);
     }
 
-    // 2. Connect to detection processing WS
     await ensureWS();
 
-    // 3. Create peer connection FIRST (before signaling connects)
     pc = new RTCPeerConnection({ iceServers });
-
-    // Add recvonly video transceiver so PC is ready to accept offers
     pc.addTransceiver('video', { direction: 'recvonly' });
 
     pc.ontrack = (evt) => {
       console.log('[WebRTC] Got remote track:', evt.track.kind);
       if (evt.track.kind === 'video') {
-        remoteVideo.srcObject = evt.streams[0];
-        remoteVideo.play().catch(() => {});
-        startCapture(remoteVideo);
+        liveVideo.srcObject = evt.streams[0];
+        liveVideo.play().catch(() => {});
+        startDetectionLoop();
         setStatus('connected', 'Glasses connected — streaming');
         btnConnect.textContent = 'Disconnect';
         btnConnect.classList.add('disconnect');
@@ -342,7 +428,6 @@ async function connectGlasses() {
       }
     };
 
-    // 4. Connect signaling WebSocket (with URL-embedded Basic auth)
     sigWs = new WebSocket(SIGNAL_URL);
 
     sigWs.onopen = () => {
@@ -350,26 +435,22 @@ async function connectGlasses() {
       sigWs.send(JSON.stringify({ type: 'join', room }));
     };
 
-    // 5. Handle signaling messages
     sigWs.onmessage = async (evt) => {
       const msg = JSON.parse(evt.data);
       console.log('[Signal] Received:', msg.type);
 
       switch (msg.type) {
         case 'room_joined':
-          // We successfully joined the room, wait for glasses
           console.log('[Signal] Joined room, waiting for glasses...');
           setStatus('connecting', 'In room — waiting for glasses...');
           break;
 
         case 'peer_joined':
-          // Glasses (creator) connected — they will send us an offer
           console.log('[Signal] Glasses connected, waiting for offer...');
           setStatus('connecting', 'Glasses connected — negotiating...');
           break;
 
         case 'offer':
-          // Glasses sent us an offer — set remote desc and create answer
           console.log('[Signal] Received offer, creating answer...');
           await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
           const answer = await pc.createAnswer();
@@ -378,7 +459,6 @@ async function connectGlasses() {
           break;
 
         case 'candidate':
-          // ICE candidate from glasses — reconstruct and add
           if (msg.candidate) {
             await pc.addIceCandidate(new RTCIceCandidate({
               candidate: msg.candidate,
@@ -414,20 +494,22 @@ async function connectGlasses() {
   } catch (err) {
     console.error('[Connect]', err);
     setStatus('error', 'Connection failed: ' + err.message);
-    btnConnect.disabled = false;
+    document.getElementById('btnConnect').disabled = false;
   }
 }
 
 function disconnectGlasses() {
-  stopCapture();
   if (pc) { pc.close(); pc = null; }
   if (sigWs) {
-    // Null out onclose before closing to prevent reconnect loops
     sigWs.onclose = null;
     sigWs.close();
     sigWs = null;
   }
-  remoteVideo.srcObject = null;
+  liveVideo.srcObject = null;
+  prevBoxes = [];
+  targetBoxes = [];
+
+  const btnConnect = document.getElementById('btnConnect');
   btnConnect.textContent = 'Connect';
   btnConnect.classList.remove('disconnect');
   btnConnect.disabled = false;
@@ -444,11 +526,11 @@ async function startWebcam() {
     webcamStream = await navigator.mediaDevices.getUserMedia({
       video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
     });
-    webcamVideo.srcObject = webcamStream;
-    await webcamVideo.play();
+    liveVideo.srcObject = webcamStream;
+    await liveVideo.play();
 
     await ensureWS();
-    startCapture(webcamVideo);
+    startDetectionLoop();
 
     setStatus('connected', 'Webcam active');
     document.getElementById('btnStartCam').style.display = 'none';
@@ -460,12 +542,13 @@ async function startWebcam() {
 }
 
 function stopWebcam() {
-  stopCapture();
   if (webcamStream) {
     webcamStream.getTracks().forEach(t => t.stop());
     webcamStream = null;
   }
-  webcamVideo.srcObject = null;
+  liveVideo.srcObject = null;
+  prevBoxes = [];
+  targetBoxes = [];
   document.getElementById('btnStartCam').style.display = 'inline-block';
   document.getElementById('btnStopCam').style.display = 'none';
   setStatus('connecting', 'Webcam stopped');

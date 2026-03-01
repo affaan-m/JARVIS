@@ -1,15 +1,15 @@
 """
 WebSocket stream processor for real-time person detection.
-Receives JPEG frames via WS, runs YOLO11n (ONNX) tracking, returns annotated
-JPEG + broadcasts an MJPEG stream.
+Receives JPEG frames via WS, runs YOLO11n (ONNX) tracking, returns JSON
+detections. Browser overlays boxes on live video via canvas.
 
 Endpoints:
   GET  /           — Redirect to /viewer
   GET  /viewer       — Operator page (WebRTC relay from VisionClaw glasses)
   GET  /watch        — Secondary site (MJPEG viewer)
   GET  /stream       — Raw MJPEG multipart stream
-  WS   /ws/process   — Send JPEG -> receive annotated JPEG
-  WS   /ws/detect    — (legacy) Send JPEG -> receive JSON detections
+  WS   /ws/process   — Send JPEG -> receive annotated JPEG (MJPEG clients)
+  WS   /ws/detect    — Send JPEG -> receive JSON detections (primary path)
   GET  /api/health   — Health check
 """
 
@@ -27,10 +27,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-# CPU threading optimizations — set before any model imports
-os.environ.setdefault("OMP_NUM_THREADS", "4")
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")
-os.environ.setdefault("MKL_NUM_THREADS", "4")
+# CPU threading optimizations — 1 thread avoids context-switch overhead on 1-vCPU
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("ORT_NUM_THREADS", "1")
 
 # ---------------------------------------------------------------------------
 # Globals
@@ -42,16 +43,23 @@ ONNX_WEIGHTS = BASE_DIR / "yolo11n.onnx"
 PT_WEIGHTS = BASE_DIR / "yolo11n.pt"
 STATIC_DIR = BASE_DIR / "static"
 
-INPUT_SIZE = 320  # ONNX exported at 320px — 4x fewer pixels than 640
-JPEG_QUALITY = 60  # Halves bandwidth vs 95, still looks fine
+INPUT_SIZE = int(os.environ.get("YOLO_INPUT_SIZE", "320"))  # 192 after ONNX re-export, 320 default
+CONF_THRESHOLD = 0.4
+JPEG_QUALITY = 60  # For MJPEG annotated stream
 
 # MJPEG broadcast: latest annotated frame shared with all /stream viewers
 mjpeg_frame: bytes = b""
-mjpeg_frame_id: int = 0  # monotonic counter to detect new frames
+mjpeg_frame_id: int = 0
+mjpeg_client_count: int = 0  # Only generate annotated frames when > 0
+
+# Frame skip: run YOLO every Nth frame, return cached detections on skips
+DETECT_EVERY_N = 2  # Run YOLO every 2nd frame
+_cached_detections: dict = {"detections": [], "frame_width": 0, "frame_height": 0, "process_time_ms": 0, "skipped": False}
+_frame_counter: int = 0
 
 
 # ---------------------------------------------------------------------------
-# Drawing (ported from human_detection.py)
+# Drawing (for MJPEG annotated stream only)
 # ---------------------------------------------------------------------------
 def draw_box(frame, x1: int, y1: int, x2: int, y2: int, label: str, color: tuple):
     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
@@ -62,23 +70,19 @@ def draw_box(frame, x1: int, y1: int, x2: int, y2: int, label: str, color: tuple
 
 
 # ---------------------------------------------------------------------------
-# Core: decode -> YOLO .track() -> annotate -> encode JPEG
+# Core: decode -> YOLO .track() -> annotate -> encode JPEG (MJPEG path)
 # ---------------------------------------------------------------------------
 def process_and_annotate(jpeg_bytes: bytes) -> tuple[bytes, dict]:
-    """Decode JPEG, run YOLO tracking, draw boxes, re-encode annotated JPEG.
-
-    Returns (annotated_jpeg_bytes, metadata_dict).
-    """
+    """Decode JPEG, run YOLO tracking, draw boxes, re-encode annotated JPEG."""
     arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
     frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if frame is None:
         return jpeg_bytes, {"detections": 0, "process_time_ms": 0}
 
-    # YOLO tracking — class 0 = person, persist reuses IDs across frames
     results = yolo_model.track(
         source=frame,
         classes=[0],
-        conf=0.5,
+        conf=CONF_THRESHOLD,
         imgsz=INPUT_SIZE,
         persist=True,
         verbose=False,
@@ -91,26 +95,113 @@ def process_and_annotate(jpeg_bytes: bytes) -> tuple[bytes, dict]:
         x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
         conf = float(box.conf[0])
         track_id = int(box.id[0]) if box.id is not None else None
-
-        label = "Person"
-        if track_id is not None:
-            label = f"Person #{track_id}"
+        label = f"Person #{track_id}" if track_id is not None else "Person"
         label += f" {conf:.0%}"
-
         draw_box(frame, x1, y1, x2, y2, label, (0, 255, 0))
 
-    # HUD overlay
     cv2.putText(
         frame, f"People: {person_count}",
         (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2,
     )
 
-    # Encode annotated frame as JPEG
     _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
-    annotated_jpeg = buf.tobytes()
+    return buf.tobytes(), {"detections": person_count}
 
-    meta = {"detections": person_count}
-    return annotated_jpeg, meta
+
+# ---------------------------------------------------------------------------
+# Core: decode -> YOLO .track() -> JSON detections (primary fast path)
+# ---------------------------------------------------------------------------
+def process_frame_json(jpeg_bytes: bytes, force_detect: bool = False) -> dict:
+    """Decode JPEG, run YOLO person detection, return JSON results.
+
+    With frame skipping: runs YOLO every DETECT_EVERY_N frames, returns
+    cached detections on skip frames (costs only ~5ms for decode).
+    """
+    global _frame_counter, _cached_detections
+
+    _frame_counter += 1
+    run_yolo = force_detect or (_frame_counter % DETECT_EVERY_N == 0)
+
+    arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if frame is None:
+        return {"detections": [], "frame_width": 0, "frame_height": 0,
+                "process_time_ms": 0, "skipped": True}
+
+    orig_h, orig_w = frame.shape[:2]
+
+    if not run_yolo:
+        # Return cached detections without running YOLO
+        cached = _cached_detections.copy()
+        cached["frame_width"] = orig_w
+        cached["frame_height"] = orig_h
+        cached["skipped"] = True
+        cached["process_time_ms"] = 0
+        return cached
+
+    results = yolo_model.track(
+        source=frame,
+        classes=[0],
+        conf=CONF_THRESHOLD,
+        imgsz=INPUT_SIZE,
+        persist=True,
+        verbose=False,
+    )
+
+    detections = []
+    boxes = results[0].boxes
+
+    for box in boxes:
+        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+        conf = float(box.conf[0])
+        track_id = int(box.id[0]) if box.id is not None else None
+
+        detections.append({
+            "x1": x1 / orig_w,
+            "y1": y1 / orig_h,
+            "x2": x2 / orig_w,
+            "y2": y2 / orig_h,
+            "name": f"Person #{track_id}" if track_id else "Person",
+            "confidence": round(conf, 2),
+            "color": "#00FF00",
+        })
+
+    result = {
+        "detections": detections,
+        "frame_width": orig_w,
+        "frame_height": orig_h,
+        "process_time_ms": 0,
+        "skipped": False,
+    }
+    _cached_detections = result.copy()
+
+    # Lazily generate annotated MJPEG frame when /stream has viewers
+    if mjpeg_client_count > 0:
+        _generate_mjpeg_frame(frame, boxes, len(detections))
+
+    return result
+
+
+def _generate_mjpeg_frame(frame, boxes, person_count: int):
+    """Draw boxes on frame and update MJPEG broadcast buffer."""
+    global mjpeg_frame, mjpeg_frame_id
+
+    for box in boxes:
+        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+        conf = float(box.conf[0])
+        track_id = int(box.id[0]) if box.id is not None else None
+        label = f"Person #{track_id}" if track_id is not None else "Person"
+        label += f" {conf:.0%}"
+        draw_box(frame, x1, y1, x2, y2, label, (0, 255, 0))
+
+    cv2.putText(
+        frame, f"People: {person_count}",
+        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2,
+    )
+
+    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+    mjpeg_frame = buf.tobytes()
+    mjpeg_frame_id += 1
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +215,6 @@ async def lifespan(app: FastAPI):
 
     from ultralytics import YOLO
 
-    # Prefer ONNX (faster on CPU), fall back to .pt
     if ONNX_WEIGHTS.exists():
         print(f"[StreamProcessor] Using ONNX weights: {ONNX_WEIGHTS}")
         yolo_model = YOLO(str(ONNX_WEIGHTS), task="detect")
@@ -136,7 +226,7 @@ async def lifespan(app: FastAPI):
 
     # Warm up
     dummy = np.zeros((INPUT_SIZE, INPUT_SIZE, 3), dtype=np.uint8)
-    yolo_model.track(dummy, classes=[0], conf=0.5, persist=True, verbose=False)
+    yolo_model.track(dummy, classes=[0], conf=CONF_THRESHOLD, persist=True, verbose=False)
 
     print(f"[StreamProcessor] Model loaded in {time.time() - t0:.1f}s")
     yield
@@ -152,7 +242,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files (viewer.html, watch.html)
 STATIC_DIR.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -185,21 +274,26 @@ async def watch_page():
 
 
 # ---------------------------------------------------------------------------
-# MJPEG broadcast stream
+# MJPEG broadcast stream (with client counting)
 # ---------------------------------------------------------------------------
 async def mjpeg_generator():
     """Yield MJPEG frames as multipart chunks."""
+    global mjpeg_client_count
+    mjpeg_client_count += 1
     last_seen = 0
-    while True:
-        if mjpeg_frame_id > last_seen and mjpeg_frame:
-            last_seen = mjpeg_frame_id
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n"
-                + mjpeg_frame
-                + b"\r\n"
-            )
-        await asyncio.sleep(0.03)  # ~30 Hz poll, actual rate limited by producer
+    try:
+        while True:
+            if mjpeg_frame_id > last_seen and mjpeg_frame:
+                last_seen = mjpeg_frame_id
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n"
+                    + mjpeg_frame
+                    + b"\r\n"
+                )
+            await asyncio.sleep(0.03)
+    finally:
+        mjpeg_client_count -= 1
 
 
 @app.get("/stream")
@@ -212,6 +306,7 @@ async def mjpeg_stream():
 
 # ---------------------------------------------------------------------------
 # WebSocket: /ws/process — receives JPEG, returns annotated JPEG + MJPEG push
+# (Kept for /watch and /stream MJPEG consumers)
 # ---------------------------------------------------------------------------
 @app.websocket("/ws/process")
 async def ws_process(websocket: WebSocket):
@@ -226,7 +321,6 @@ async def ws_process(websocket: WebSocket):
         try:
             while True:
                 data = await websocket.receive_bytes()
-                # Drop stale frames — only keep the latest
                 if latest_frame.full():
                     try:
                         latest_frame.get_nowait()
@@ -249,12 +343,9 @@ async def ws_process(websocket: WebSocket):
                 )
                 process_ms = round((time.time() - t0) * 1000, 1)
 
-                # Push to MJPEG broadcast
                 mjpeg_frame = annotated_jpeg
                 mjpeg_frame_id += 1
 
-                # Send annotated frame back to viewer as binary
-                # Prefix with 8 bytes of metadata (process_ms as float, detections as int)
                 header = struct.pack("<fI", process_ms, meta["detections"])
                 try:
                     await websocket.send_bytes(header + annotated_jpeg)
@@ -283,102 +374,26 @@ async def ws_process(websocket: WebSocket):
 
 
 # ---------------------------------------------------------------------------
-# Legacy WebSocket: /ws/detect — returns JSON detections (kept for compat)
+# WebSocket: /ws/detect — PRIMARY path: returns JSON detections
+# Viewer overlays boxes on live video via canvas (no server re-encode)
 # ---------------------------------------------------------------------------
-def process_frame_json(jpeg_bytes: bytes) -> dict:
-    """Decode JPEG, run YOLO person detection, return JSON results."""
-    arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
-    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if frame is None:
-        return {"detections": [], "frame_width": 0, "frame_height": 0}
-
-    orig_h, orig_w = frame.shape[:2]
-    results = yolo_model.track(
-        source=frame,
-        classes=[0],
-        conf=0.5,
-        imgsz=INPUT_SIZE,
-        persist=True,
-        verbose=False,
-    )
-
-    detections = []
-    boxes = results[0].boxes
-
-    for box in boxes:
-        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-        conf = float(box.conf[0])
-        track_id = int(box.id[0]) if box.id is not None else None
-
-        detections.append({
-            "x1": x1 / orig_w,
-            "y1": y1 / orig_h,
-            "x2": x2 / orig_w,
-            "y2": y2 / orig_h,
-            "name": f"Person #{track_id}" if track_id else "Person",
-            "confidence": round(conf, 2),
-            "color": "#00FF00",
-        })
-
-    return {
-        "detections": detections,
-        "frame_width": orig_w,
-        "frame_height": orig_h,
-        "process_time_ms": 0,
-    }
-
-
 @app.websocket("/ws/detect")
 async def ws_detect(websocket: WebSocket):
     await websocket.accept()
     print("[WS /ws/detect] Client connected")
 
-    latest_frame: asyncio.Queue = asyncio.Queue(maxsize=1)
-
-    async def reader():
-        try:
-            while True:
-                data = await websocket.receive_bytes()
-                if latest_frame.full():
-                    try:
-                        latest_frame.get_nowait()
-                    except asyncio.QueueEmpty:
-                        pass
-                latest_frame.put_nowait(data)
-        except WebSocketDisconnect:
-            pass
-        except Exception:
-            pass
-
-    async def processor():
-        try:
-            while True:
-                jpeg_bytes = await latest_frame.get()
-                t0 = time.time()
-                result = await asyncio.to_thread(process_frame_json, jpeg_bytes)
-                result["process_time_ms"] = round((time.time() - t0) * 1000, 1)
-                try:
-                    await websocket.send_json(result)
-                except Exception:
-                    break
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            pass
-
-    reader_task = asyncio.create_task(reader())
-    processor_task = asyncio.create_task(processor())
-
+    # Request-response flow: client sends frame, waits for response, then sends next
     try:
-        done, pending = await asyncio.wait(
-            [reader_task, processor_task],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for task in pending:
-            task.cancel()
-    except Exception:
-        reader_task.cancel()
-        processor_task.cancel()
+        while True:
+            jpeg_bytes = await websocket.receive_bytes()
+            t0 = time.time()
+            result = await asyncio.to_thread(process_frame_json, jpeg_bytes)
+            result["process_time_ms"] = round((time.time() - t0) * 1000, 1)
+            await websocket.send_json(result)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"[WS /ws/detect] Error: {e}")
 
     print("[WS /ws/detect] Client disconnected")
 

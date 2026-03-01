@@ -22,12 +22,14 @@ COPY export_onnx.py .
 COPY static/ ./static/
 COPY yolo11n.pt .
 
-# Export ONNX at build time (320px input)
+# Export ONNX at build time (192px input)
 RUN python export_onnx.py
 
-ENV OMP_NUM_THREADS=4
-ENV OPENBLAS_NUM_THREADS=4
-ENV MKL_NUM_THREADS=4
+ENV OMP_NUM_THREADS=1
+ENV OPENBLAS_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+ENV ORT_NUM_THREADS=1
+ENV YOLO_INPUT_SIZE=192
 
 EXPOSE 8765
 
