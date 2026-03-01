@@ -15,6 +15,7 @@ enum WebRTCConfig {
   static var isConfigured: Bool {
     return !signalingServerURL.isEmpty
       && signalingServerURL != "ws://YOUR_MAC_IP:8080"
+      && signalingServerURL != "wss://YOUR_MAC_IP:8080"
   }
 
   /// Derive the HTTP base URL from the WebSocket signaling URL.

@@ -76,14 +76,11 @@ const httpServer = http.createServer((req, res) => {
 // WebSocket signaling server
 const wss = new WebSocketServer({ server: httpServer });
 
+// Fixed room code so the viewer can always connect with the same code
+const FIXED_ROOM_CODE = "VCLAW1";
+
 function generateRoomCode() {
-  // No ambiguous chars (0/O, 1/I/L)
-  const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 6; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return code;
+  return FIXED_ROOM_CODE;
 }
 
 wss.on("connection", (ws, req) => {
@@ -103,6 +100,19 @@ wss.on("connection", (ws, req) => {
     switch (msg.type) {
       case "create": {
         const code = generateRoomCode();
+        // If the fixed room already exists, clean it up first
+        if (rooms.has(code)) {
+          const oldRoom = rooms.get(code);
+          if (oldRoom.destroyTimer) clearTimeout(oldRoom.destroyTimer);
+          if (oldRoom.viewer && oldRoom.viewer.readyState === 1) {
+            oldRoom.viewer.send(JSON.stringify({ type: "peer_left" }));
+          }
+          if (oldRoom.creator && oldRoom.creator !== ws && oldRoom.creator.readyState === 1) {
+            oldRoom.creator.close();
+          }
+          rooms.delete(code);
+          console.log(`[Room] Replaced existing room: ${code}`);
+        }
         rooms.set(code, { creator: ws, viewer: null, destroyTimer: null });
         currentRoom = code;
         role = "creator";
