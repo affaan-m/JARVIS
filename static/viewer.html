@@ -292,9 +292,16 @@ function sendFrame() {
 // Kick off detection loop — retries quickly until video is ready
 function startDetectionLoop() {
   console.log('[Detection] Loop started');
+  let waitingLogCount = 0;
   // Retry every 200ms until first frame succeeds, then request-response takes over
   const initInterval = setInterval(() => {
     if (!pendingFrame) {
+      if (!liveVideo.videoWidth || !liveVideo.videoHeight) {
+        if (waitingLogCount++ % 10 === 0) {
+          console.log('[Detection] Waiting for video to be ready (videoWidth=' + liveVideo.videoWidth + ')');
+        }
+        return;
+      }
       sendFrame();
       // Once a frame was sent successfully, slow down the safety interval
       if (pendingFrame) {
@@ -448,8 +455,23 @@ async function connectGlasses() {
       }
     };
 
+    // ICE timeout: warn if stuck in "checking" for >15s (likely needs TURN)
+    let iceCheckingTimer = null;
     pc.oniceconnectionstatechange = () => {
       console.log('[WebRTC] ICE state:', pc.iceConnectionState);
+      if (pc.iceConnectionState === 'checking') {
+        iceCheckingTimer = setTimeout(() => {
+          if (pc && pc.iceConnectionState === 'checking') {
+            console.warn('[WebRTC] ICE stuck in "checking" for 15s — STUN-only cannot traverse NAT. TURN relay is needed but CORS blocks credential fetch.');
+            setStatus('error', 'ICE stuck — TURN relay needed (CORS blocked)');
+          }
+        }, 15000);
+      } else {
+        clearTimeout(iceCheckingTimer);
+      }
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        console.log('[WebRTC] ICE connected — video stream should be flowing');
+      }
       if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
         setStatus('error', 'WebRTC disconnected');
       }
@@ -588,6 +610,13 @@ function setStatus(cls, text) {
   statusEl.className = cls;
   statusEl.textContent = text;
 }
+
+// ---------------------------------------------------------------------------
+// Keepalive ping — prevents sandbox auto-stop while viewer is open
+// ---------------------------------------------------------------------------
+setInterval(() => {
+  fetch('/api/health').catch(() => {});
+}, 5 * 60 * 1000);
 </script>
 </body>
 </html>
