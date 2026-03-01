@@ -251,6 +251,29 @@ export const update = mutation({
   },
 });
 
+// Wipe all persons + activity log (fresh start)
+export const deleteAll = mutation({
+  handler: async (ctx) => {
+    const persons = await ctx.db.query("persons").collect();
+    for (const p of persons) {
+      await ctx.db.delete(p._id);
+    }
+    const logs = await ctx.db.query("activityLog").collect();
+    for (const l of logs) {
+      await ctx.db.delete(l._id);
+    }
+    const frags = await ctx.db.query("intelFragments").collect();
+    for (const f of frags) {
+      await ctx.db.delete(f._id);
+    }
+    const conns = await ctx.db.query("connections").collect();
+    for (const c of conns) {
+      await ctx.db.delete(c._id);
+    }
+    return { deleted: persons.length };
+  },
+});
+
 // Backend-compatible get by person_id
 export const get = query({
   args: { person_id: v.string() },

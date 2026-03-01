@@ -19,8 +19,9 @@ from synthesis.models import (
 )
 
 SYNTHESIS_PROMPT = """\
-You are a person intelligence analyst. Given raw data about a person, \
-synthesize a structured dossier.
+You are an elite person intelligence analyst building a comprehensive dossier. \
+Given raw data about a person, synthesize the MOST DETAILED and THOROUGH report possible. \
+Extract EVERY fact, detail, connection, and data point from the sources.
 
 Person name: {person_name}
 
@@ -29,7 +30,10 @@ Raw data sources:
 
 Produce a JSON object with EXACTLY these fields (no extra fields):
 {{
-  "summary": "2-3 sentence overview of who this person is",
+  "summary": "A thorough 4-6 sentence profile. Include their full name, current role, \
+key accomplishments, notable affiliations, and anything that makes them distinctive. \
+Be specific with numbers, dates, and details. This is the intel briefing a field agent \
+would receive before meeting this person.",
   "title": "their current job title or primary role",
   "company": "their current company or organization",
   "work_history": [
@@ -39,23 +43,28 @@ Produce a JSON object with EXACTLY these fields (no extra fields):
     {{"school": "University Name", "degree": "BS Computer Science"}}
   ],
   "social_profiles": {{
-    "linkedin": "linkedin.com/in/username or null",
-    "twitter": "@handle or null",
-    "instagram": "@handle or null",
-    "github": "github.com/username or null",
-    "website": "example.com or null"
+    "linkedin": "full linkedin URL or null",
+    "twitter": "full twitter URL or @handle or null",
+    "instagram": "full instagram URL or @handle or null",
+    "github": "full github URL or null",
+    "website": "full website URL or null"
   }},
-  "notable_activity": ["Recent notable things they have done"],
-  "conversation_hooks": ["Interesting talking points to bring up in conversation"],
-  "risk_flags": ["Any red flags or controversial associations, empty array if none"]
+  "notable_activity": ["Be specific: 'Published paper on X at Y conference (2024)', \
+not vague 'Has published papers'. Include dates, numbers, specifics."],
+  "conversation_hooks": ["Highly specific talking points that show deep knowledge. \
+Reference their actual projects, recent posts, interests. e.g. 'Ask about their recent \
+talk at PyCon on async patterns' not generic 'Ask about their work'"],
+  "risk_flags": ["Any red flags, controversies, lawsuits, data breaches, or concerning \
+associations. Empty array if genuinely none."]
 }}
 
 Rules:
+- MAXIMIZE detail. Extract every fact from the raw data. Do not summarize away specifics.
 - Only include information supported by the raw data. Do not fabricate.
 - If a field has no data, use empty string, empty array, or null.
-- Keep summaries concise and factual.
-- Conversation hooks should be specific and actionable.
-- Risk flags should only include genuinely concerning items, not neutral facts.
+- Conversation hooks must be SPECIFIC and reference actual projects/posts/interests.
+- The summary should read like a classified intelligence briefing, not a LinkedIn bio.
+- Notable activity items should each be a complete, specific fact with context.
 - Return ONLY valid JSON, no markdown fencing, no explanation.
 """
 
@@ -187,11 +196,16 @@ class AnthropicSynthesisEngine:
             client = self._get_client()
             response = await client.messages.create(
                 model="claude-sonnet-4-6",
-                max_tokens=4096,
+                max_tokens=8192,
                 messages=[{"role": "user", "content": prompt}],
             )
 
-            response_text = response.content[0].text if response.content else ""
+            # Extract text from response (skip thinking blocks if present)
+            response_text = ""
+            for block in response.content:
+                if hasattr(block, "text"):
+                    response_text = block.text
+                    break
             if not response_text:
                 return SynthesisResult(
                     person_name=request.person_name,

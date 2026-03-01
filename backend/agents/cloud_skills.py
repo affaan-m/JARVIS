@@ -75,8 +75,8 @@ class CloudSkillRunner:
     def __init__(self, settings: Settings):
         self._api_key = settings.browser_use_api_key
         self._profile_id = settings.browser_use_profile_id
+        self._op_vault_id = settings.op_vault_id
         self._client = None
-        self._session_id: str | None = None
 
     @property
     def configured(self) -> bool:
@@ -94,15 +94,13 @@ class CloudSkillRunner:
             logger.warning("browser_use_sdk not installed")
             return None
 
-    async def _ensure_session(self) -> str | None:
-        """Create an authenticated session from synced browser profile.
+    async def _create_fresh_session(self) -> str | None:
+        """Create a fresh authenticated session from synced browser profile.
 
-        The profile stores cookies from all platforms the agent is logged
-        into. Creating a session from it means every task inherits those
-        login states — no passwords, no CAPTCHAs, no 2FA.
+        Each task gets its own session — Browser Use sessions are single-use
+        and stop after a task completes. The profile stores cookies from all
+        platforms the agent is logged into.
         """
-        if self._session_id:
-            return self._session_id
         if not self._profile_id:
             return None
 
@@ -114,15 +112,13 @@ class CloudSkillRunner:
             session = await client.sessions.create_session(
                 profile_id=self._profile_id,
                 proxy_country_code="us",
-                keep_alive=True,
                 persist_memory=True,
             )
-            self._session_id = session.id
-            logger.info(
-                "cloud_skills: authenticated session {} from profile {}",
-                self._session_id, self._profile_id[:16],
+            logger.debug(
+                "cloud_skills: fresh session {} from profile {}",
+                session.id, self._profile_id[:16],
             )
-            return self._session_id
+            return session.id
         except Exception as exc:
             logger.warning("cloud_skills: session creation failed: {}", exc)
             return None
@@ -196,32 +192,33 @@ class CloudSkillRunner:
         if client is None:
             return None
 
-        # Get authenticated session if profile is configured
-        session_id = await self._ensure_session()
-
         try:
             create_kwargs: dict = {
                 "task": task,
                 "llm": "browser-use-2.0",
                 "max_steps": max_steps,
             }
-            if session_id:
-                create_kwargs["session_id"] = session_id
             if skill_ids:
                 create_kwargs["skill_ids"] = skill_ids
             if secrets:
                 create_kwargs["secrets"] = secrets
             if allowed_domains:
                 create_kwargs["allowed_domains"] = allowed_domains
+            # 1Password vault for cross-session auth (logins, OTP)
+            if self._op_vault_id:
+                create_kwargs["op_vault_id"] = self._op_vault_id
 
             logger.info(
-                "cloud_skills: creating task label={} preview={}",
+                "cloud_skills: creating task label={} preview={} vault={}",
                 label,
                 task[:80],
+                bool(self._op_vault_id),
             )
 
             result = await client.tasks.create_task(**create_kwargs)
             task_id = result.id
+            # Grab live URL for real-time viewing
+            live_url = getattr(result, "live_url", None) or getattr(result, "liveUrl", None)
             max_polls = int(timeout / POLL_INTERVAL_SECONDS)
 
             for _ in range(max_polls):
@@ -234,6 +231,7 @@ class CloudSkillRunner:
                         "success": bool(status.is_success),
                         "cost": str(status.cost) if status.cost else "unknown",
                         "task_id": task_id,
+                        "live_url": live_url,
                         "label": label,
                     }
                     logger.info(
@@ -249,7 +247,7 @@ class CloudSkillRunner:
                 label,
                 timeout,
             )
-            return None
+            return {"output": "", "success": False, "task_id": task_id, "live_url": live_url, "label": label, "timed_out": True}
 
         except Exception as exc:
             logger.error(

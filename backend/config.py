@@ -13,7 +13,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = "SPECTER API"
+    app_name: str = "JARVIS API"
     environment: str = Field(default="development", alias="SPECTER_ENV")
     log_level: str = Field(default="INFO", alias="SPECTER_LOG_LEVEL")
     frontend_origin: str = Field(default="http://localhost:3000", alias="SPECTER_FRONTEND_ORIGIN")
@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     pimeyes_password: str | None = Field(default=None, alias="PIMEYES_PASSWORD")
     sixtyfour_api_key: str | None = Field(default=None, alias="SIXTYFOUR_API_KEY")
     browser_use_profile_id: str | None = Field(default=None, alias="BROWSER_USE_PROFILE_ID")
+    op_vault_id: str | None = Field(default=None, alias="OP_VAULT_ID")
 
     def service_flags(self) -> dict[str, bool]:
         return {

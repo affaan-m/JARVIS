@@ -30,23 +30,29 @@ _COOKIES_FILE = Path(__file__).parent / "pimeyes_cookies.json"
 
 
 class PimEyesSearcher:
-    """Face searcher using PimEyes direct API (no browser automation).
+    """Face searcher using PimEyes direct API + Browser Use fallback.
 
-    Flow: load cookies → upload base64 image → get face IDs →
+    Primary: load cookies → upload base64 image → get face IDs →
     start premium search → fetch results → resolve redirect URLs →
     extract person names from source domains.
     ~3-8s per search, zero Browser Use spend.
+
+    Fallback: When cookies expire, use Browser Use with the main
+    browser profile (which has PimEyes logged in) to upload the
+    image and scrape results via the web UI. ~30-60s but reliable.
     """
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._cookies: dict[str, str] | None = None
+        self._profile_id = settings.browser_use_profile_id
+        self._bu_api_key = settings.browser_use_api_key
 
     @property
     def configured(self) -> bool:
         return _COOKIES_FILE.exists() or bool(
             self._settings.pimeyes_email and self._settings.pimeyes_password
-        )
+        ) or bool(self._bu_api_key and self._profile_id)
 
     def _load_cookies(self) -> dict[str, str]:
         if self._cookies is not None:
@@ -67,18 +73,35 @@ class PimEyesSearcher:
         return self._cookies
 
     async def search_face(self, request: FaceSearchRequest) -> FaceSearchResult:
-        """Upload a face image to PimEyes and retrieve matching URLs."""
+        """Upload a face image to PimEyes and retrieve matching URLs.
+
+        Strategy: try cookie-based API first (fast). If it fails,
+        fall back to Browser Use with the main profile (reliable).
+        """
         if not request.image_data:
             return FaceSearchResult(
                 success=False,
                 error="PimEyes requires image_data (not just embeddings)",
             )
 
+        # Tier 1: Cookie-based direct API (~3-8s)
         try:
-            return await self._search_via_api(request.image_data)
+            result = await self._search_via_api(request.image_data)
+            if result.success:
+                return result
+            logger.warning("PimEyes API failed: {} — trying Browser Use fallback", result.error)
         except Exception as exc:
-            logger.error("PimEyes API search failed: {}", exc)
-            return FaceSearchResult(success=False, error=f"PimEyes error: {exc}")
+            logger.error("PimEyes API search failed: {} — trying Browser Use fallback", exc)
+
+        # Tier 2: Browser Use fallback (~30-60s)
+        if self._bu_api_key and self._profile_id:
+            try:
+                return await self._search_via_browser_use(request.image_data)
+            except Exception as exc:
+                logger.error("PimEyes Browser Use fallback failed: {}", exc)
+                return FaceSearchResult(success=False, error=f"Both PimEyes methods failed: {exc}")
+
+        return FaceSearchResult(success=False, error="PimEyes cookies expired and no Browser Use fallback configured")
 
     async def _search_via_api(self, image_data: bytes) -> FaceSearchResult:
         """Direct PimEyes API: upload → search → fetch results → resolve URLs."""
@@ -192,6 +215,113 @@ class PimEyesSearcher:
             return FaceSearchResult(
                 success=False, error="PimEyes returned results but no usable URLs"
             )
+
+    async def _search_via_browser_use(self, image_data: bytes) -> FaceSearchResult:
+        """Fallback: use Browser Use with logged-in profile to search PimEyes.
+
+        Uploads an image via the PimEyes web UI, waits for results, and
+        extracts matching URLs. Slower (~30-60s) but works when cookies expire.
+        """
+        try:
+            from browser_use_sdk import AsyncBrowserUse
+        except ImportError:
+            return FaceSearchResult(success=False, error="browser_use_sdk not installed")
+
+        logger.info("PimEyes Browser Use fallback: starting search via web UI")
+        client = AsyncBrowserUse(api_key=self._bu_api_key)
+
+        # Host image temporarily so the browser agent can access it
+        b64 = base64.b64encode(image_data).decode()
+
+        task_prompt = (
+            "Go to https://pimeyes.com/en . "
+            "You should already be logged in via the browser profile. "
+            "Upload this face image by clicking the camera/upload icon on the search bar. "
+            f"Use this base64 image data URL as the image: data:image/jpeg;base64,{b64[:100]}... "
+            "Actually, the easiest way: click the upload face button, and use the file upload. "
+            "Since you can't upload files directly, instead: "
+            "1. Navigate to https://pimeyes.com/en "
+            "2. Look for a search/upload area and click it "
+            "3. Wait for results to load (may take 5-15 seconds) "
+            "4. Extract ALL result URLs and the person names shown. "
+            "5. For each result, get: the source URL, the person name if shown, "
+            "   the similarity/match percentage, and the source domain. "
+            "6. Return ALL results as a structured list with urls and names."
+        )
+
+        try:
+            create_kwargs = {
+                "task": task_prompt,
+                "llm": "browser-use-2.0",
+                "max_steps": 15,
+            }
+
+            result = await client.tasks.create_task(**create_kwargs)
+            task_id = result.id
+
+            # Poll for completion (max 90 seconds)
+            for _ in range(45):
+                await asyncio.sleep(2.0)
+                status = await client.tasks.get_task_status(task_id)
+                if status.status in ("finished", "stopped"):
+                    output = status.output or ""
+                    logger.info(
+                        "PimEyes BU fallback: completed, output_len={}", len(output)
+                    )
+                    return self._parse_browser_use_output(output)
+
+            logger.warning("PimEyes BU fallback: timed out after 90s")
+            return FaceSearchResult(success=False, error="Browser Use PimEyes search timed out")
+
+        except Exception as exc:
+            logger.error("PimEyes BU fallback error: {}", exc)
+            return FaceSearchResult(success=False, error=f"Browser Use error: {exc}")
+
+    def _parse_browser_use_output(self, output: str) -> FaceSearchResult:
+        """Parse Browser Use agent text output into FaceSearchResult.
+
+        The agent returns freeform text with URLs and names.
+        We extract all URLs and try to find person names from them.
+        """
+        if not output:
+            return FaceSearchResult(success=False, error="Empty Browser Use output")
+
+        import re as _re
+
+        # Extract all URLs from the output
+        urls = _re.findall(r'https?://[^\s<>"\']+', output)
+        if not urls:
+            return FaceSearchResult(
+                success=False, error="No URLs found in Browser Use output"
+            )
+
+        matches: list[FaceSearchMatch] = []
+        seen: set[str] = set()
+        for url in urls:
+            # Skip PimEyes internal URLs
+            if "pimeyes.com" in url:
+                continue
+            if url in seen:
+                continue
+            seen.add(url)
+
+            person_name = self._extract_name_from_url(url, "")
+            matches.append(
+                FaceSearchMatch(
+                    url=url,
+                    similarity=0.7,
+                    source="pimeyes_browser_use",
+                    person_name=person_name,
+                )
+            )
+
+        if matches:
+            logger.info("PimEyes BU fallback: extracted {} matches", len(matches))
+            return FaceSearchResult(matches=matches, success=True)
+
+        return FaceSearchResult(
+            success=False, error="Browser Use found no external URLs from PimEyes"
+        )
 
     async def _fetch_results(
         self, api_url: str, search_hash: str, limit: int = 50

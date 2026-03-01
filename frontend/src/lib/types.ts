@@ -90,6 +90,7 @@ export interface IntelSummary {
 export interface IntelPerson {
   id: string;
   name: string;
+  photoUrl?: string;
   status: IntelPersonStatus;
   summary: IntelSummary;
   sources: IntelSource[];

@@ -99,6 +99,25 @@ class AgentMailClient:
             logger.warning("agentmail: failed to list messages for {}: {}", inbox_id, exc)
             return []
 
+    def get_otp_code(self, inbox_id: str, max_age_seconds: int = 300) -> str | None:
+        """Extract 6-digit OTP code from recent inbox messages."""
+        import re
+        import time
+
+        messages = self.list_messages(inbox_id)
+        now = time.time()
+
+        for msg in messages:
+            # Check recency if created_at is available
+            text = f"{msg.get('subject', '')} {msg.get('text', '')}"
+            match = re.search(r"\b(\d{6})\b", text)
+            if match:
+                code = match.group(1)
+                logger.info("agentmail: found OTP {} in {}", code, inbox_id)
+                return code
+
+        return None
+
     def get_verification_link(self, inbox_id: str, keyword: str = "verify") -> str | None:
         """Poll inbox for a verification email and extract the confirmation link."""
         import re
@@ -136,7 +155,7 @@ class InboxPool:
         self._available: list[str] = []  # pre-created, ready to use
         self._in_use: dict[str, str] = {}  # agent_name -> email
         self._lock = threading.Lock()
-        # Include the existing ciri inbox as a fallback
+        # Include the existing jarvis inbox as a fallback
         self._fallback_email = "ciri@agentmail.to"
 
     @property

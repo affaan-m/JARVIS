@@ -48,7 +48,7 @@ export function useVoiceCommands({
 
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
-    recognition.interimResults = false;
+    recognition.interimResults = true; // Process interim for faster trigger response
     recognition.lang = "en-US";
     recognition.maxAlternatives = 3;
     recognitionRef.current = recognition;
@@ -57,24 +57,29 @@ export function useVoiceCommands({
       setStatus("listening");
     };
 
+    // Track which commands we've already fired per utterance to avoid double-fire
+    const firedForUtterance = new Set<number>();
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     recognition.onresult = (event: any) => {
-      // Only process the latest result
-      const result = event.results[event.results.length - 1];
-      if (!result.isFinal) return;
-
+      const resultIdx = event.results.length - 1;
+      const result = event.results[resultIdx];
       const transcript = result[0].transcript.trim().toLowerCase();
+
+      // Update transcript display on every result (interim + final)
       onTranscriptRef.current?.(transcript);
 
-      // Check each command trigger
-      for (const cmd of commandsRef.current) {
-        if (transcript.includes(cmd.trigger.toLowerCase())) {
-          setLastCommand(cmd.trigger);
-          setStatus("processing");
-          cmd.action();
-          // Reset to listening after brief feedback
-          setTimeout(() => setStatus("listening"), 1500);
-          return;
+      // Fire command on first match (even interim) for instant response
+      if (!firedForUtterance.has(resultIdx)) {
+        for (const cmd of commandsRef.current) {
+          if (transcript.includes(cmd.trigger.toLowerCase())) {
+            firedForUtterance.add(resultIdx);
+            setLastCommand(cmd.trigger);
+            setStatus("processing");
+            cmd.action();
+            setTimeout(() => setStatus("listening"), 1500);
+            return;
+          }
         }
       }
     };

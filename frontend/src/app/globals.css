@@ -58,6 +58,15 @@ body {
   height: 100vh;
 }
 
+/* Invisible scrollbars — scrollable but no visible bar */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+*::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
+}
+
 /* Fluorescent light overlay */
 body::before {
   content: "";
@@ -145,4 +154,93 @@ body::after {
 
 .status-pulse {
   animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* JARVIS HUD ambient glow — subtle arc reactor vibe */
+.jarvis-glow {
+  position: relative;
+}
+.jarvis-glow::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(74, 222, 128, 0.0) 10%,
+    rgba(74, 222, 128, 0.15) 30%,
+    rgba(74, 222, 128, 0.3) 50%,
+    rgba(74, 222, 128, 0.15) 70%,
+    rgba(74, 222, 128, 0.0) 90%,
+    transparent 100%
+  );
+  z-index: 51;
+}
+
+/* Hex grid background for board depth */
+.hex-grid-bg {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill-rule='evenodd'%3E%3Cg fill='%23486b38' fill-opacity='0.03'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* Radar sweep for active scanning */
+@keyframes radarSweep {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.radar-sweep {
+  position: absolute;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(74, 222, 128, 0.06) 30deg,
+    transparent 60deg
+  );
+  animation: radarSweep 4s linear infinite;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+/* Enhanced card hover glow */
+@keyframes cardGlow {
+  0%, 100% { box-shadow: 0 4px 14px rgba(0,0,0,.35), 0 1px 3px rgba(0,0,0,.15); }
+  50% { box-shadow: 0 4px 14px rgba(0,0,0,.35), 0 1px 3px rgba(0,0,0,.15), 0 0 20px rgba(74, 124, 63, 0.08); }
+}
+
+/* Noise grain texture overlay */
+.grain-overlay::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 999;
+}
+
+/* Card arrival animation — scale up with green glow pulse */
+@keyframes cardArrival {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+    box-shadow: 0 0 0 rgba(74, 222, 128, 0);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(74, 222, 128, 0.3);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  }
+}
+
+.card-arrival {
+  animation: cardArrival 0.5s ease-out;
 }

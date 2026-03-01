@@ -11,9 +11,9 @@ export const demoPersons: PersonRecord[] = [
     dossier: {
       summary: "Builder-operator with strong infra instincts and a habit of shipping live demos under time pressure.",
       title: "Infrastructure Lead",
-      company: "CIRI",
+      company: "JARVIS",
       workHistory: [
-        { role: "Infra Lead", company: "CIRI", period: "2026-present" },
+        { role: "Infra Lead", company: "JARVIS", period: "2026-present" },
         { role: "Full-Stack Engineer", company: "Stealth", period: "2024-2026" },
       ],
       education: [{ school: "UC Berkeley", degree: "B.S. Computer Science" }],
@@ -36,8 +36,8 @@ export const demoPersons: PersonRecord[] = [
     dossier: {
       summary: "Frontend-heavy operator focused on cinematic intelligence-board UX and judge-facing polish.",
       title: "Frontend Systems",
-      company: "CIRI",
-      workHistory: [{ role: "Frontend Systems", company: "CIRI", period: "2026-present" }],
+      company: "JARVIS",
+      workHistory: [{ role: "Frontend Systems", company: "JARVIS", period: "2026-present" }],
       education: [{ school: "Stanford", degree: "HCI" }],
       socialProfiles: {
         linkedin: "linkedin.com/in/minasol",
@@ -58,8 +58,8 @@ export const demoPersons: PersonRecord[] = [
     dossier: {
       summary: "Owns synthesis and evaluation flows, with a bias for observability before scale.",
       title: "Research Systems",
-      company: "CIRI",
-      workHistory: [{ role: "Research Systems", company: "CIRI", period: "2026-present" }],
+      company: "JARVIS",
+      workHistory: [{ role: "Research Systems", company: "JARVIS", period: "2026-present" }],
       education: [{ school: "MIT", degree: "AI + Systems" }],
       socialProfiles: {
         github: "github.com/elirowan",

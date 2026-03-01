@@ -5,13 +5,14 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from agents.browser_use_client import BrowserUseClient, BrowserUseError
 from agents.deep_researcher import DeepResearcher
 from agents.orchestrator import ResearchOrchestrator
+from capture.audio_handler import AudioCommandProcessor
 from capture.frame_handler import FrameHandler
 from capture.service import CaptureService
 from capture.telegram_bot import TelegramCaptureBot, create_telegram_bot
@@ -51,7 +52,7 @@ settings = get_settings()
 
 # Log to file so we can tail from CLI
 import sys
-logger.add("/tmp/ciri_backend.log", rotation="10 MB", level="DEBUG",
+logger.add("/tmp/jarvis_backend.log", rotation="10 MB", level="DEBUG",
            format="{time:HH:mm:ss.SSS} | {level:<7} | {name}:{function}:{line} | {message}")
 
 # Initialize Laminar tracing (no-op if LMNR_PROJECT_API_KEY not set)
@@ -80,6 +81,9 @@ supermemory_client = SuperMemoryClient(settings.supermemory_api_key) if settings
 
 # DeepResearcher — unified pipeline (replaces per-agent orchestrator)
 deep_researcher = DeepResearcher(settings) if settings.browser_use_api_key else None
+
+# Audio command processor (Gemini Flash transcription)
+audio_processor = AudioCommandProcessor(settings.gemini_api_key) if settings.gemini_api_key else None
 
 pipeline = CapturePipeline(
     detector=detector,
@@ -163,7 +167,7 @@ _share_url_cache: dict[str, str] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info(
-        "SPECTER started — det={} emb={} db={} face_search={} exa={} deep_researcher={} synth={} (primary) synth_fallback={} supermemory={}",
+        "JARVIS started — det={} emb={} db={} face_search={} exa={} deep_researcher={} synth={} (primary) synth_fallback={} supermemory={}",
         detector.__class__.__name__,
         embedder.__class__.__name__,
         db_gateway.__class__.__name__,
@@ -181,13 +185,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await telegram_bot.stop()
     if supermemory_client:
         await supermemory_client.close()
-    logger.info("SPECTER shutting down")
+    logger.info("JARVIS shutting down")
 
 
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
-    summary="Control plane and service seams for the SPECTER hackathon stack",
+    summary="Control plane and service seams for the JARVIS hackathon stack",
     lifespan=lifespan,
 )
 
@@ -378,6 +382,7 @@ async def stream_research(person_name: str, image_url: str | None = None):
             "data": _json.dumps({
                 "person_id": person_id,
                 "person_name": person_name,
+                "image_url": image_url,
                 "live_session_id": None,
                 "live_url": None,
             }),
@@ -462,6 +467,30 @@ async def stream_research(person_name: str, image_url: str | None = None):
         })}
 
     return EventSourceResponse(event_generator())
+
+
+# --- Audio WebSocket (glasses mic → Whisper → command matching) ---
+
+
+@app.websocket("/ws/audio/{room_code}")
+async def audio_ws(websocket: WebSocket, room_code: str):
+    await websocket.accept()
+    if not audio_processor:
+        await websocket.close(code=1008, reason="OpenAI API key not configured")
+        return
+    logger.info("audio_ws: connected room={}", room_code)
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            transcript = await audio_processor.transcribe_chunk(data)
+            if transcript:
+                await websocket.send_json({"type": "transcript", "text": transcript})
+                cmd, arg = audio_processor.match_command(transcript)
+                if cmd != "NONE":
+                    await websocket.send_json({"type": "command", "command": cmd, "argument": arg})
+                    logger.info("audio_ws: command={} arg={}", cmd, arg)
+    except Exception as exc:
+        logger.info("audio_ws: disconnected room={}: {}", room_code, exc)
 
 
 # --- Browser Use agent research ---

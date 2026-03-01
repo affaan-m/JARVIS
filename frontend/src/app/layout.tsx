@@ -21,7 +21,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "CIRI // CLASSIFIED",
+  title: "JARVIS // CLASSIFIED",
   description: "Real-time person intelligence platform",
 };
 

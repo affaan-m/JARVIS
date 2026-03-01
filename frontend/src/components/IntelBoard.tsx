@@ -2,12 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { demoPeople } from "@/lib/demo-data";
-import type { Dossier, IntelPerson, IntelSource, IntelSourceSessionStatus } from "@/lib/types";
+import { useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
+import type { IntelPerson, IntelSource, IntelSourceSessionStatus } from "@/lib/types";
 import { useFrameCapture } from "@/lib/useFrameCapture";
 import { useGlassesStream } from "@/lib/useGlassesStream";
 import { useResearchStream } from "@/lib/useResearchStream";
+import { useServerVoice } from "@/lib/useServerVoice";
 import { useVoiceCommands } from "@/lib/useVoiceCommands";
+import { useVoiceSynthesis } from "@/lib/useVoiceSynthesis";
+import { useSoundEffects } from "@/lib/useSoundEffects";
+import { useAchievements } from "@/lib/useAchievements";
 import { BrowserSessionViewer } from "./BrowserSessionViewer";
 import { CameraFeed } from "./CameraFeed";
 import { Sidebar } from "./Sidebar";
@@ -160,6 +165,16 @@ const Shimmer = ({ pi }: { pi: number }) => {
 };
 
 // Utility functions
+function cleanSnippet(text: string): string {
+  return text
+    .replace(/\[Exa\]\s*/gi, "")
+    .replace(/\[SixtyFour\]\s*/gi, "")
+    .replace(/\[SixtyFour Deep\]\s*/gi, "")
+    .replace(/={3,}/g, "")
+    .replace(/\s{3,}/g, " ")
+    .trim();
+}
+
 function catenary(x1: number, y1: number, x2: number, y2: number) {
   const d = Math.hypot(x2 - x1, y2 - y1), sag = Math.min(d * .25, 80) + 25;
   return `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${Math.max(y1, y2) + sag} ${x2} ${y2}`;
@@ -252,6 +267,8 @@ interface SelDoc {
   nm?: string;
   tp?: string;
   sn?: string;
+  url?: string;
+  taskId?: string;
   sessionId?: string;
   liveUrl?: string;
   shareUrl?: string;
@@ -263,124 +280,194 @@ const PILL = { display: "inline-block", padding: "3px 8px", borderRadius: 3, bac
 
 function DossierModal({ person }: { person: IntelPerson }) {
   const d = person.dossier;
+
+  // Platform icons for social profiles
+  const platformIcons: Record<string, string> = {
+    linkedin: "in", twitter: "X", instagram: "IG", github: "</>", website: "WWW",
+  };
+
   return (
     <div style={{ position: "relative", zIndex: 1 }}>
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12 }}>
+      {/* Header — classified document style */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 16, marginBottom: 16 }}>
+        {/* Photo or avatar */}
         <div style={{
-          width: 48, height: 48, borderRadius: "50%", flexShrink: 0,
-          background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)",
+          width: 64, height: 64, borderRadius: 4, flexShrink: 0,
+          background: "rgba(120,180,80,.06)", border: "1px solid rgba(120,180,80,.15)",
           display: "flex", alignItems: "center", justifyContent: "center",
+          overflow: "hidden",
         }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="8" r="4" fill="#52525b" />
-            <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" fill="#52525b" />
-          </svg>
+          {person.photoUrl ? (
+            <img src={person.photoUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          ) : (
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="8" r="4" fill="rgba(120,180,80,.3)" />
+              <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" fill="rgba(120,180,80,.3)" />
+            </svg>
+          )}
         </div>
-        <div>
-          <div style={{ color: "#f4f4f5", fontSize: 18, fontWeight: 700, letterSpacing: ".04em" }}>
+        <div style={{ flex: 1 }}>
+          <div style={{
+            color: "rgba(120,180,80,.4)", fontSize: 8, fontWeight: 700,
+            letterSpacing: ".2em", marginBottom: 4,
+          }}>
+            SUBJECT DOSSIER
+          </div>
+          <div style={{ color: "#e8f0d8", fontSize: 20, fontWeight: 700, letterSpacing: ".06em", lineHeight: 1.2 }}>
             {person.summary.nm}
           </div>
           {(d?.title || d?.company) && (
-            <div style={{ color: "#71717a", fontSize: 11, marginTop: 2 }}>
-              {d.title}{d.title && d.company ? " · " : ""}{d.company}
+            <div style={{ color: "rgba(120,180,80,.6)", fontSize: 12, marginTop: 4, fontFamily: "var(--font-mono)" }}>
+              {d?.title}{d?.title && d?.company ? " // " : ""}{d?.company}
             </div>
           )}
         </div>
       </div>
 
-      <div style={{ height: 1, background: "rgba(255,255,255,.07)", marginBottom: 14 }} />
+      <div style={{ height: 1, background: "rgba(120,180,80,.1)", marginBottom: 16 }} />
 
-      {/* Summary */}
-      <div style={{ color: "#a1a1aa", fontSize: 13, lineHeight: 1.75, marginBottom: 18 }}>
+      {/* Summary — the main intel brief */}
+      <div style={{
+        color: "#c8d6b0", fontSize: 13.5, lineHeight: 1.8, marginBottom: 20,
+        padding: "12px 14px",
+        background: "rgba(120,180,80,.03)", borderRadius: 4,
+        border: "1px solid rgba(120,180,80,.08)",
+        borderLeft: "3px solid rgba(120,180,80,.25)",
+      }}>
         {d?.summary || person.summary.sm}
       </div>
 
-      {/* Social Links */}
-      {d?.socialProfiles && Object.keys(d.socialProfiles).length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={SH}>SOCIAL PROFILES</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+      {/* Social Links — horizontal strip with icons */}
+      {d?.socialProfiles && Object.entries(d.socialProfiles).some(([, v]) => v) && (
+        <div style={{ marginBottom: 18 }}>
+          <div style={SH}>LINKED PROFILES</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {Object.entries(d.socialProfiles).map(([platform, url]) => url ? (
-              <a key={platform} href={url} target="_blank" rel="noopener noreferrer"
-                style={{ ...PILL, color: "#818cf8", textDecoration: "none", cursor: "pointer" }}>
-                {platform}
+              <a key={platform} href={url.startsWith("http") ? url : `https://${url}`} target="_blank" rel="noopener noreferrer"
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "5px 10px", borderRadius: 4,
+                  background: "rgba(120,180,80,.05)", border: "1px solid rgba(120,180,80,.12)",
+                  color: "rgba(120,180,80,.8)", textDecoration: "none", cursor: "pointer",
+                  fontSize: 11, fontFamily: "var(--font-mono)", letterSpacing: ".03em",
+                  transition: "background .15s, border-color .15s",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(120,180,80,.1)"; e.currentTarget.style.borderColor = "rgba(120,180,80,.25)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(120,180,80,.05)"; e.currentTarget.style.borderColor = "rgba(120,180,80,.12)"; }}
+              >
+                <span style={{
+                  fontSize: 8, fontWeight: 800, letterSpacing: ".08em",
+                  color: "rgba(120,180,80,.5)", minWidth: 16, textAlign: "center",
+                }}>
+                  {platformIcons[platform] ?? platform[0].toUpperCase()}
+                </span>
+                <span>{platform}</span>
               </a>
             ) : null)}
           </div>
         </div>
       )}
 
-      {/* Work History */}
-      {d?.workHistory && d.workHistory.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={SH}>WORK HISTORY</div>
-          {d.workHistory.map((w, i) => (
-            <div key={i} style={{ marginBottom: 8, paddingLeft: 10, borderLeft: "2px solid rgba(255,255,255,.06)" }}>
-              <div style={{ color: "#e4e4e7", fontSize: 12, fontWeight: 600 }}>{w.role}</div>
-              <div style={{ color: "#71717a", fontSize: 11 }}>
-                {w.company}{w.period ? ` · ${w.period}` : ""}
+      {/* Two-column layout for Work + Education */}
+      <div style={{ display: "flex", gap: 20, marginBottom: 18 }}>
+        {/* Work History */}
+        {d?.workHistory && d.workHistory.length > 0 && (
+          <div style={{ flex: 1 }}>
+            <div style={SH}>WORK HISTORY</div>
+            {d.workHistory.map((w, i) => (
+              <div key={i} style={{
+                marginBottom: 10, paddingLeft: 10,
+                borderLeft: "2px solid rgba(120,180,80,.15)",
+              }}>
+                <div style={{ color: "#e8f0d8", fontSize: 12, fontWeight: 600 }}>{w.role}</div>
+                <div style={{ color: "rgba(120,180,80,.5)", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                  {w.company}{w.period ? ` // ${w.period}` : ""}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
 
-      {/* Education */}
-      {d?.education && d.education.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={SH}>EDUCATION</div>
-          {d.education.map((e, i) => (
-            <div key={i} style={{ marginBottom: 6, paddingLeft: 10, borderLeft: "2px solid rgba(255,255,255,.06)" }}>
-              <div style={{ color: "#e4e4e7", fontSize: 12, fontWeight: 600 }}>{e.school}</div>
-              {e.degree && <div style={{ color: "#71717a", fontSize: 11 }}>{e.degree}</div>}
-            </div>
-          ))}
-        </div>
-      )}
+        {/* Education */}
+        {d?.education && d.education.length > 0 && (
+          <div style={{ flex: 1 }}>
+            <div style={SH}>EDUCATION</div>
+            {d.education.map((e, i) => (
+              <div key={i} style={{
+                marginBottom: 10, paddingLeft: 10,
+                borderLeft: "2px solid rgba(120,180,80,.15)",
+              }}>
+                <div style={{ color: "#e8f0d8", fontSize: 12, fontWeight: 600 }}>{e.school}</div>
+                {e.degree && <div style={{ color: "rgba(120,180,80,.5)", fontSize: 11 }}>{e.degree}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
-      {/* Notable Activity */}
+      {/* Notable Activity — as a structured list with bullets */}
       {d?.notableActivity && d.notableActivity.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
+        <div style={{ marginBottom: 18 }}>
           <div style={SH}>NOTABLE ACTIVITY</div>
-          <ul style={{ margin: 0, paddingLeft: 16, color: "#a1a1aa", fontSize: 12, lineHeight: 1.7 }}>
-            {d.notableActivity.map((a, i) => <li key={i}>{a}</li>)}
-          </ul>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {d.notableActivity.map((a, i) => (
+              <div key={i} style={{
+                display: "flex", gap: 8, alignItems: "flex-start",
+                padding: "6px 10px", borderRadius: 3,
+                background: i % 2 === 0 ? "rgba(120,180,80,.02)" : "transparent",
+              }}>
+                <span style={{ color: "rgba(120,180,80,.3)", fontSize: 10, marginTop: 2, flexShrink: 0 }}>&#9656;</span>
+                <span style={{ color: "#c8d6b0", fontSize: 12, lineHeight: 1.6 }}>{a}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
-      {/* Conversation Hooks */}
+      {/* Conversation Hooks — green accent cards */}
       {d?.conversationHooks && d.conversationHooks.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={SH}>CONVERSATION HOOKS</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ ...SH, color: "rgba(74,222,128,.5)" }}>CONVERSATION HOOKS</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {d.conversationHooks.map((h, i) => (
-              <span key={i} style={{ ...PILL, background: "rgba(74,222,128,.06)", border: "1px solid rgba(74,222,128,.12)", color: "#86efac" }}>
+              <div key={i} style={{
+                padding: "8px 12px", borderRadius: 4,
+                background: "rgba(74,222,128,.04)", border: "1px solid rgba(74,222,128,.1)",
+                color: "#86efac", fontSize: 12, lineHeight: 1.6,
+              }}>
                 {h}
-              </span>
+              </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Risk Flags */}
+      {/* Risk Flags — red accent */}
       {d?.riskFlags && d.riskFlags.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ ...SH, color: "#ef4444" }}>RISK FLAGS</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ ...SH, color: "rgba(239,68,68,.6)" }}>RISK FLAGS</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {d.riskFlags.map((r, i) => (
-              <span key={i} style={{ ...PILL, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.15)", color: "#fca5a5" }}>
+              <div key={i} style={{
+                padding: "8px 12px", borderRadius: 4,
+                background: "rgba(239,68,68,.04)", border: "1px solid rgba(239,68,68,.12)",
+                color: "#fca5a5", fontSize: 12, lineHeight: 1.6,
+              }}>
                 {r}
-              </span>
+              </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Sources count */}
-      <div style={{ height: 1, background: "rgba(255,255,255,.07)", marginTop: 8, marginBottom: 10 }} />
-      <div style={{ color: "#52525b", fontSize: 10, fontFamily: "monospace", letterSpacing: ".08em" }}>
-        {person.sources.length} INTELLIGENCE SOURCE{person.sources.length !== 1 ? "S" : ""} COLLECTED
+      {/* Footer — source count */}
+      <div style={{ height: 1, background: "rgba(120,180,80,.08)", marginTop: 8, marginBottom: 10 }} />
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        color: "rgba(120,180,80,.3)", fontSize: 9, fontFamily: "monospace", letterSpacing: ".1em",
+      }}>
+        <span>{person.sources.length} INTELLIGENCE SOURCE{person.sources.length !== 1 ? "S" : ""} COLLECTED</span>
+        <span>JARVIS // CLASSIFIED</span>
       </div>
     </div>
   );
@@ -405,11 +492,44 @@ export default function IntelBoard() {
   } = useResearchStream();
 
   // Merge streamed person into people list
-  const [people, setPeople] = useState<IntelPerson[]>(demoPeople);
+  const [people, setPeople] = useState<IntelPerson[]>([]);
   const [activePerson, setActivePerson] = useState<IntelPerson | null>(null);
   const [boardData, setBoardData] = useState<BoardData>({ blu: null, srcs: [] });
   const [boardFade, setBoardFade] = useState(true);
   const [search, setSearch] = useState("");
+
+  // ─── Convex persistence: load existing persons on mount ───
+  const convexPersons = useQuery(api.persons.listAll);
+  const hydrated = useRef(false);
+  useEffect(() => {
+    if (hydrated.current || !convexPersons || convexPersons.length === 0) return;
+    hydrated.current = true;
+    const mapped: IntelPerson[] = convexPersons.map((p) => ({
+      id: p._id,
+      name: p.name,
+      photoUrl: p.photoUrl || undefined,
+      status: p.status === "complete" ? "complete" : p.status === "researching" ? "scanning" : "inactive",
+      summary: {
+        nm: p.name.toUpperCase(),
+        sm: p.dossier?.summary ?? `Subject ${p.name}`,
+        title: p.dossier?.title,
+        location: p.dossier?.company,
+      },
+      sources: [],
+      dossier: p.dossier ? {
+        summary: p.dossier.summary,
+        title: p.dossier.title,
+        company: p.dossier.company,
+        workHistory: p.dossier.workHistory,
+        education: p.dossier.education,
+        socialProfiles: p.dossier.socialProfiles,
+        notableActivity: p.dossier.notableActivity,
+        conversationHooks: p.dossier.conversationHooks,
+        riskFlags: p.dossier.riskFlags,
+      } : undefined,
+    }));
+    setPeople(mapped);
+  }, [convexPersons]);
 
   // When streamPerson updates, merge into people list + APPEND new sources (don't rebuild)
   const prevSourceCountRef = useRef(0);
@@ -428,7 +548,10 @@ export default function IntelBoard() {
     };
 
     setPeople((prev) => {
-      const existing = prev.findIndex((p) => p.id === enrichedPerson.id);
+      // Deduplicate by id OR name (prevents duplicate sidebar entries)
+      const existing = prev.findIndex(
+        (p) => p.id === enrichedPerson.id || p.name.toLowerCase() === enrichedPerson.name.toLowerCase()
+      );
       if (existing >= 0) {
         const updated = [...prev];
         updated[existing] = enrichedPerson;
@@ -497,8 +620,16 @@ export default function IntelBoard() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [vsc, setVsc] = useState(1);
   const {
-    videoRef, status: camStatus, connect: camConnect, connectWebcam: camWebcam, disconnect: camDisconnect, error: camError,
+    videoRef, audioTrack, status: camStatus, connect: camConnect, connectWebcam: camWebcam, disconnect: camDisconnect, error: camError,
   } = useGlassesStream();
+  const [roomCode, setRoomCode] = useState<string | null>(null);
+
+  // Wrap camConnect to capture the room code for the audio WebSocket
+  const handleCamConnect = useCallback((code: string) => {
+    setRoomCode(code);
+    camConnect(code);
+  }, [camConnect]);
+
   const [detectionCount, setDetectionCount] = useState<number | undefined>(undefined);
 
   // Pipeline status for visual feedback overlay
@@ -563,11 +694,107 @@ export default function IntelBoard() {
     }
   }, [isStreaming, streamPerson]);
 
+  // ─── Voice Synthesis (JARVIS reads dossier aloud) ───
+  const {
+    isSpeaking, displayText: synthTranscript, speak: speakDossier, stop: stopSpeaking,
+  } = useVoiceSynthesis();
+
+  // Auto-speak when dossier arrives
+  const lastSpokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activePerson?.dossier?.summary) return;
+    const key = `${activePerson.id}::${activePerson.dossier.summary.slice(0, 50)}`;
+    if (lastSpokenRef.current === key) return;
+    lastSpokenRef.current = key;
+    const intro = `Intel briefing on ${activePerson.name}. `;
+    speakDossier(intro + activePerson.dossier.summary);
+  }, [activePerson?.id, activePerson?.dossier?.summary, activePerson?.name, speakDossier]);
+
+  // ─── Sound Effects ───
+  const { scannerBeep, targetLock, successChime, sourceFound } = useSoundEffects();
+
+  // ─── Achievements ───
+  const { toast: achievementToast, fireAchievement } = useAchievements();
+
+  // ─── Source combo tracking ───
+  const sourceTimestampsRef = useRef<number[]>([]);
+  const [comboCount, setComboCount] = useState<number>(0);
+  const comboTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ─── Wire sound effects into pipeline status changes ───
+  const prevPipelineStageRef = useRef<string>("idle");
+  useEffect(() => {
+    const stage = pipelineStatus.stage;
+    if (stage === "detected" && prevPipelineStageRef.current !== "detected") {
+      scannerBeep();
+    }
+    if (stage === "identified" && prevPipelineStageRef.current !== "identified") {
+      targetLock();
+    }
+    prevPipelineStageRef.current = stage;
+  }, [pipelineStatus.stage, scannerBeep, targetLock]);
+
+  // ─── Wire success chime on stream completion ───
+  const wasStreamingRef = useRef(false);
+  useEffect(() => {
+    if (wasStreamingRef.current && !isStreaming) {
+      successChime();
+    }
+    wasStreamingRef.current = isStreaming;
+  }, [isStreaming, successChime]);
+
+  // ─── Wire sound + combo on new sources ───
+  const prevTotalSourcesRef = useRef(0);
+  useEffect(() => {
+    if (totalSources > prevTotalSourcesRef.current) {
+      sourceFound();
+      const now = Date.now();
+      sourceTimestampsRef.current = [...sourceTimestampsRef.current, now];
+      // Count sources in last 5 seconds
+      const recent = sourceTimestampsRef.current.filter(t => now - t < 5000);
+      sourceTimestampsRef.current = recent;
+      if (recent.length >= 3) {
+        setComboCount(recent.length);
+        if (comboTimerRef.current) clearTimeout(comboTimerRef.current);
+        comboTimerRef.current = setTimeout(() => setComboCount(0), 3000);
+      }
+      if (recent.length >= 5) {
+        fireAchievement("COMBO_5X");
+      }
+    }
+    prevTotalSourcesRef.current = totalSources;
+  }, [totalSources, sourceFound, fireAchievement]);
+
+  // ─── Wire achievements ───
+  useEffect(() => {
+    if (people.length >= 1) fireAchievement("FIRST_TARGET");
+    if (people.length >= 3) fireAchievement("MULTI_TARGET");
+  }, [people.length, fireAchievement]);
+
+  useEffect(() => {
+    if (totalSources >= 10) fireAchievement("DEEP_INTEL");
+  }, [totalSources, fireAchievement]);
+
+  useEffect(() => {
+    if (wasStreamingRef.current === false && !isStreaming && totalSources > 0 && people.length > 0) {
+      fireAchievement("INTEL_COMPLETE");
+    }
+  }, [isStreaming, totalSources, people.length, fireAchievement]);
+
   // ─── Voice Commands via Web Speech API ───
   // "target" / "scan" → capture current frame & trigger face ID pipeline
   // "research <name>" → skip face ID, go straight to SSE research
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [lastTranscript, setLastTranscript] = useState<string | null>(null);
+
+  // ─── Voice command feedback popup ───
+  const [commandFlash, setCommandFlash] = useState<string | null>(null);
+  const commandFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showCommandFlash = useCallback((label: string) => {
+    if (commandFlashTimer.current) clearTimeout(commandFlashTimer.current);
+    setCommandFlash(label);
+    commandFlashTimer.current = setTimeout(() => setCommandFlash(null), 2200);
+  }, []);
 
   // Capture-now: grab a single frame, send to backend, and advance pipeline
   const captureNow = useCallback(async () => {
@@ -627,26 +854,55 @@ export default function IntelBoard() {
     {
       trigger: "target",
       action: () => {
+        showCommandFlash("TARGET CONFIRMED");
         if (camStatus === "live") captureNow();
       },
     },
     {
       trigger: "lock on",
       action: () => {
+        showCommandFlash("LOCK ON CONFIRMED");
         if (camStatus === "live") captureNow();
       },
     },
     {
       trigger: "scan",
       action: () => {
+        showCommandFlash("SCAN INITIATED");
         if (camStatus === "live") captureNow();
       },
     },
-  ], [camStatus, captureNow]);
+  ], [camStatus, captureNow, showCommandFlash]);
 
   const { status: voiceStatus, lastCommand: voiceLastCommand } = useVoiceCommands({
     commands: voiceCommands(),
     enabled: voiceEnabled,
+    onTranscript: setLastTranscript,
+  });
+
+  // Server-side voice from glasses microphone (Whisper transcription)
+  const handleServerCommand = useCallback((cmd: string, arg: string | null) => {
+    const labelMap: Record<string, string> = {
+      TARGET_CONFIRMED: "TARGET CONFIRMED",
+      LOCK_ON: "LOCK ON CONFIRMED",
+      SCAN_INITIATED: "SCAN INITIATED",
+      BRIEF_ME: "BRIEFING",
+      RESEARCH: arg ? `RESEARCH: ${arg}` : "RESEARCH",
+    };
+    showCommandFlash(labelMap[cmd] || cmd);
+    if (["TARGET_CONFIRMED", "LOCK_ON", "SCAN_INITIATED"].includes(cmd) && camStatus === "live") {
+      captureNow();
+    }
+    if (cmd === "RESEARCH" && arg && !isStreaming) {
+      startStream(arg);
+    }
+  }, [showCommandFlash, camStatus, captureNow, isStreaming, startStream]);
+
+  useServerVoice({
+    audioTrack,
+    roomCode,
+    enabled: camStatus === "live",
+    onCommand: handleServerCommand,
     onTranscript: setLastTranscript,
   });
 
@@ -753,7 +1009,7 @@ export default function IntelBoard() {
       width: "100vw", height: "100vh", overflow: "hidden", position: "relative",
       fontFamily: "'Inter',system-ui,sans-serif", display: "flex", flexDirection: "column",
       background: "var(--bg-dark)",
-    }}>
+    }} className="grain-overlay">
       <style>{`
         @keyframes sh{0%{background-position:-150px 0}100%{background-position:150px 0}}
         @keyframes fi{0%{opacity:0;transform:scale(.78)}100%{opacity:1;transform:scale(1)}}
@@ -769,6 +1025,10 @@ export default function IntelBoard() {
         @keyframes faceScanLine{0%{transform:translateY(-16px);opacity:0}20%{opacity:1}80%{opacity:1}100%{transform:translateY(16px);opacity:0}}
         @keyframes checkCircle{0%{stroke-dasharray:0 150}100%{stroke-dasharray:150 0}}
         @keyframes checkMark{0%{stroke-dashoffset:40}100%{stroke-dashoffset:0}}
+        @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+        @keyframes commandFlashIn{0%{opacity:0;transform:scale(1.05)}100%{opacity:1;transform:scale(1)}}
+        @keyframes commandBorderPulse{0%{border-color:rgba(74,222,128,.6);box-shadow:inset 0 0 40px rgba(74,222,128,.08)}50%{border-color:rgba(74,222,128,.2);box-shadow:inset 0 0 20px rgba(74,222,128,.03)}100%{border-color:transparent;box-shadow:none}}
+        @keyframes commandTextPulse{0%{opacity:1;transform:scale(1)}60%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.02)}}
       `}</style>
 
       {/* TOP BAR */}
@@ -789,7 +1049,7 @@ export default function IntelBoard() {
         />
 
         {/* BOARD AREA — fills entire right space with green background */}
-        <div style={{
+        <div className="hex-grid-bg" style={{
           flex: 1, position: "relative", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
           backgroundColor: "var(--board-bg)",
           backgroundImage: [
@@ -803,6 +1063,81 @@ export default function IntelBoard() {
             position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1,
             background: "radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,.35) 100%)",
           }} />
+
+          {/* Streaming indicator — shows on board when sources are arriving */}
+          {isStreaming && activePerson && (
+            <div style={{
+              position: "absolute", top: 12, left: 16, zIndex: 30,
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "6px 14px", borderRadius: 4,
+              background: "rgba(0,0,0,.65)", backdropFilter: "blur(8px)",
+              border: "1px solid rgba(120,180,80,.2)",
+              animation: "fi .4s ease-out",
+            }}>
+              <div style={{
+                width: 8, height: 8, borderRadius: "50%",
+                background: "#4ade80",
+                animation: "scanPulse 1.5s ease-in-out infinite",
+                boxShadow: "0 0 8px rgba(74,222,128,.5)",
+              }} />
+              <span style={{
+                fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".1em",
+                color: "rgba(120,180,80,.8)", fontWeight: 600,
+              }}>
+                SCANNING — {totalSources} SOURCE{totalSources !== 1 ? "S" : ""}
+              </span>
+              {/* Progress bar */}
+              <div style={{
+                marginTop: 6, width: 120, height: 3, borderRadius: 2,
+                background: "rgba(120,180,80,.15)",
+              }}>
+                <div style={{
+                  width: `${Math.min(100, totalSources * 5)}%`,
+                  height: "100%", borderRadius: 2,
+                  background: "linear-gradient(90deg, #4ade80, #22c55e)",
+                  boxShadow: "0 0 8px rgba(74,222,128,.5)",
+                  transition: "width 0.3s ease-out",
+                }} />
+              </div>
+            </div>
+          )}
+
+          {/* COMBO COUNTER — top-right of board */}
+          {comboCount >= 3 && (
+            <div style={{
+              position: "absolute", top: 12, right: 16, zIndex: 30,
+              padding: "6px 16px", borderRadius: 4,
+              background: "rgba(0,0,0,.7)", backdropFilter: "blur(8px)",
+              border: "1px solid rgba(74,222,128,.4)",
+              fontFamily: "var(--font-heading)", fontSize: 20,
+              letterSpacing: ".15em", color: "#4ade80",
+              textShadow: "0 0 20px rgba(74,222,128,.5)",
+              animation: "fi .3s ease-out",
+            }}>
+              {comboCount}x COMBO
+            </div>
+          )}
+
+          {/* STATS PANEL — bottom-right of board */}
+          {(people.length > 0 || totalSources > 0) && (
+            <div style={{
+              position: "absolute", bottom: 12, right: 16, zIndex: 30,
+              padding: "5px 14px", borderRadius: 3,
+              background: "rgba(0,0,0,.55)", backdropFilter: "blur(8px)",
+              border: "1px solid rgba(120,180,80,.12)",
+              fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".1em",
+              color: "rgba(120,180,80,.6)",
+              display: "flex", gap: 12, alignItems: "center",
+            }}>
+              <span>SOURCES: {totalSources}</span>
+              <span style={{ color: "rgba(120,180,80,.2)" }}>|</span>
+              <span>TARGETS: {people.length}</span>
+              <span style={{ color: "rgba(120,180,80,.2)" }}>|</span>
+              <span style={{ color: isStreaming ? "#4ade80" : "rgba(120,180,80,.4)" }}>
+                {isStreaming ? "\u25CF LIVE" : "IDLE"}
+              </span>
+            </div>
+          )}
 
           {/* PIPELINE STATUS OVERLAY — replaces idle placeholder with live feedback */}
           {!activePerson && (
@@ -947,7 +1282,7 @@ export default function IntelBoard() {
             <CameraFeed
               videoRef={videoRef}
               status={camStatus}
-              onConnect={camConnect}
+              onConnect={handleCamConnect}
               onWebcam={camWebcam}
               onDisconnect={camDisconnect}
               error={camError}
@@ -1014,6 +1349,76 @@ export default function IntelBoard() {
                     {voiceStatus === "error" && "MIC ERROR"}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* JARVIS Voice Transcript — below camera feed */}
+            {(isSpeaking || synthTranscript) && (
+              <div style={{
+                position: "absolute",
+                top: CAM_H + CAM_PAD + (camStatus === "live" ? 40 : 8),
+                right: CAM_PAD,
+                width: CAM_W,
+                maxHeight: 120,
+                overflow: "hidden",
+                pointerEvents: "auto",
+              }}>
+                <div style={{
+                  background: "rgba(0,0,0,.75)",
+                  border: `1px solid ${isSpeaking ? "rgba(74,222,128,.3)" : "rgba(120,180,80,.15)"}`,
+                  borderRadius: 4,
+                  padding: "8px 12px",
+                  backdropFilter: "blur(6px)",
+                  transition: "border-color .3s",
+                }}>
+                  {/* Header */}
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 6, marginBottom: 4,
+                  }}>
+                    {isSpeaking && (
+                      <div style={{
+                        width: 6, height: 6, borderRadius: "50%",
+                        background: "rgba(74,222,128,.8)",
+                        boxShadow: "0 0 6px rgba(74,222,128,.4)",
+                        animation: "scanPulse 1s ease-in-out infinite",
+                      }} />
+                    )}
+                    <span style={{
+                      fontSize: 9, fontFamily: "monospace", letterSpacing: ".15em",
+                      color: isSpeaking ? "rgba(74,222,128,.7)" : "rgba(120,180,80,.4)",
+                    }}>
+                      {isSpeaking ? "JARVIS SPEAKING" : "BRIEFING COMPLETE"}
+                    </span>
+                    {isSpeaking && (
+                      <button
+                        onClick={stopSpeaking}
+                        style={{
+                          marginLeft: "auto", padding: "1px 6px", borderRadius: 2,
+                          background: "rgba(239,68,68,.15)", border: "1px solid rgba(239,68,68,.3)",
+                          color: "rgba(239,68,68,.6)", fontSize: 8, fontFamily: "monospace",
+                          letterSpacing: ".1em", cursor: "pointer",
+                        }}
+                      >
+                        STOP
+                      </button>
+                    )}
+                  </div>
+                  {/* Transcript text */}
+                  <div style={{
+                    fontSize: 11, fontFamily: "monospace", lineHeight: 1.5,
+                    color: "rgba(200,214,176,.8)", letterSpacing: ".02em",
+                    maxHeight: 80, overflow: "hidden",
+                  }}>
+                    {synthTranscript}
+                    {isSpeaking && (
+                      <span style={{
+                        display: "inline-block", width: 6, height: 12,
+                        background: "rgba(74,222,128,.6)", marginLeft: 2,
+                        animation: "blink 1s step-end infinite",
+                      }} />
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -1088,11 +1493,17 @@ export default function IntelBoard() {
                     border: "2px solid #a8adb8",
                     display: "flex", alignItems: "center", justifyContent: "center",
                     position: "relative", zIndex: 1,
+                    overflow: "hidden",
                   }}>
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                      <circle cx="12" cy="8" r="4" fill="#8090a0" />
-                      <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" fill="#8090a0" />
-                    </svg>
+                    {activePerson.photoUrl ? (
+                      <img src={activePerson.photoUrl} alt={activePerson.name}
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <circle cx="12" cy="8" r="4" fill="#8090a0" />
+                        <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" fill="#8090a0" />
+                      </svg>
+                    )}
                   </div>
 
                   {/* Name in Bebas Neue */}
@@ -1130,14 +1541,14 @@ export default function IntelBoard() {
                     </div>
                   )}
 
-                  {/* Summary snippet */}
+                  {/* Summary snippet — prefer dossier summary, fallback to cleaned snippet */}
                   <div style={{
                     color: "#4b5563", fontSize: 8.5, lineHeight: 1.45,
                     overflow: "hidden", position: "relative", zIndex: 1,
                     display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical",
                     textAlign: "center",
                   }}>
-                    {activePerson.summary.sm}
+                    {activePerson.dossier?.summary || cleanSnippet(activePerson.summary.sm)}
                   </div>
                 </div>
               )}
@@ -1150,8 +1561,8 @@ export default function IntelBoard() {
                     key={s.id}
                     onMouseDown={e => !s.loading && startDrag(e, s.id, s.x, s.y)}
                     onClick={() => !s.loading && clickDoc({
-                      kind: "source", id: s.id, nm: s.nm, tp: s.tp, sn: s.sn,
-                      sessionId: s.sessionId, liveUrl: s.liveUrl, shareUrl: s.shareUrl, sessionStatus: s.sessionStatus,
+                      kind: "source", id: s.id, nm: s.nm, tp: s.tp, sn: s.sn, url: s.url,
+                      taskId: s.taskId, sessionId: s.sessionId, liveUrl: s.liveUrl, shareUrl: s.shareUrl, sessionStatus: s.sessionStatus,
                     })}
                     style={{
                       position: "absolute", left: s.x, top: s.y, width: GW, height: GH,
@@ -1185,11 +1596,22 @@ export default function IntelBoard() {
                             border: "1px solid rgba(5,150,105,.12)",
                           }}>{s.tp}</span>
                         </div>
-                        <div style={{ color: "#111827", fontSize: 10.5, fontWeight: 650, marginBottom: 4 }}>{s.nm}</div>
+                        <div style={{ color: "#111827", fontSize: 10.5, fontWeight: 650, marginBottom: 2 }}>{s.nm}</div>
+                        {s.url && (
+                          <div style={{
+                            color: "#6b7a58", fontSize: 7, fontFamily: "var(--font-mono)", marginBottom: 3,
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}>
+                            {new URL(s.url).hostname.replace("www.", "")}
+                          </div>
+                        )}
+                        {s.liveUrl && (
+                          <div style={{ position: "absolute", top: -8, right: -5, width: 7, height: 7, borderRadius: "50%", background: "#f59e0b", animation: "camPulse 2s ease-in-out infinite", zIndex: 5 }} />
+                        )}
                         <div style={{
                           color: "#4b5563", fontSize: 8.5, lineHeight: 1.4, overflow: "hidden",
                           textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-                        }}>{s.sn}</div>
+                        }}>{cleanSnippet(s.sn)}</div>
                       </div>
                     )}
                   </div>
@@ -1204,6 +1626,80 @@ export default function IntelBoard() {
       {/* BOTTOM STATUS BAR */}
       <StatusBar people={people} activePerson={activePerson} />
 
+      {/* ACHIEVEMENT TOAST */}
+      {achievementToast && (
+        <div style={{
+          position: "fixed", top: 20, right: 20, zIndex: 210,
+          padding: "12px 20px", borderRadius: 4,
+          background: "rgba(0,0,0,.85)", backdropFilter: "blur(12px)",
+          border: "1px solid rgba(74,222,128,.3)",
+          boxShadow: "0 0 30px rgba(74,222,128,.15), 0 8px 24px rgba(0,0,0,.4)",
+          display: "flex", alignItems: "center", gap: 10,
+          animation: "fi .4s ease-out",
+        }}>
+          <span style={{ fontSize: 20 }}>{achievementToast.icon}</span>
+          <div>
+            <div style={{
+              fontFamily: "var(--font-heading)", fontSize: 14,
+              letterSpacing: ".15em", color: "#4ade80",
+            }}>
+              ACHIEVEMENT UNLOCKED
+            </div>
+            <div style={{
+              fontFamily: "var(--font-mono)", fontSize: 11,
+              color: "rgba(120,180,80,.7)", marginTop: 2,
+            }}>
+              {achievementToast.label}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VOICE COMMAND FLASH — full-screen HUD confirmation */}
+      {commandFlash && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 200, pointerEvents: "none",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          animation: "commandFlashIn .15s ease-out",
+        }}>
+          {/* Edge flash — green border pulse */}
+          <div style={{
+            position: "absolute", inset: 0,
+            border: "2px solid rgba(74,222,128,.4)",
+            animation: "commandBorderPulse 2s ease-out forwards",
+          }} />
+          {/* Center label */}
+          <div style={{
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 10,
+          }}>
+            {/* Crosshair icon */}
+            <svg width="48" height="48" viewBox="0 0 48 48" style={{ opacity: 0.7 }}>
+              <circle cx="24" cy="24" r="18" fill="none" stroke="rgba(74,222,128,.5)" strokeWidth="1.5" />
+              <circle cx="24" cy="24" r="8" fill="none" stroke="rgba(74,222,128,.6)" strokeWidth="1" />
+              <circle cx="24" cy="24" r="2" fill="rgba(74,222,128,.8)" />
+              <line x1="24" y1="2" x2="24" y2="10" stroke="rgba(74,222,128,.5)" strokeWidth="1.5" />
+              <line x1="24" y1="38" x2="24" y2="46" stroke="rgba(74,222,128,.5)" strokeWidth="1.5" />
+              <line x1="2" y1="24" x2="10" y2="24" stroke="rgba(74,222,128,.5)" strokeWidth="1.5" />
+              <line x1="38" y1="24" x2="46" y2="24" stroke="rgba(74,222,128,.5)" strokeWidth="1.5" />
+            </svg>
+            <div style={{
+              fontFamily: "var(--font-heading)", fontSize: 32,
+              letterSpacing: ".25em", color: "rgba(74,222,128,.85)",
+              textShadow: "0 0 30px rgba(74,222,128,.4), 0 0 60px rgba(74,222,128,.15)",
+              animation: "commandTextPulse 2s ease-out forwards",
+            }}>
+              {commandFlash}
+            </div>
+            <div style={{
+              fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".15em",
+              color: "rgba(74,222,128,.4)",
+            }}>
+              VOICE COMMAND RECEIVED
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* INTELLIGENCE MODAL */}
       {modalVis && selDoc && (
         <div onClick={backFromDoc} style={{
@@ -1213,8 +1709,8 @@ export default function IntelBoard() {
         }}>
           <div onClick={e => e.stopPropagation()} style={{
             position: "relative",
-            width: selDoc.sessionId ? 760 : selDoc.kind === "summary" ? 580 : 520,
-            maxHeight: selDoc.sessionId ? "90vh" : "85vh",
+            width: (selDoc.sessionId || selDoc.liveUrl) ? 760 : selDoc.kind === "summary" ? 580 : 520,
+            maxHeight: (selDoc.sessionId || selDoc.liveUrl) ? "90vh" : "85vh",
             overflowY: "auto",
             background: "#0e0e11",
             border: "1px solid rgba(255,255,255,.08)",
@@ -1231,12 +1727,12 @@ export default function IntelBoard() {
 
             {/* Header row */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, position: "relative", zIndex: 1 }}>
-              <span style={{ color: "#52525b", fontSize: 9, fontWeight: 600, letterSpacing: ".18em", fontFamily: "monospace" }}>
+              <span style={{ color: "rgba(120,180,80,.4)", fontSize: 9, fontWeight: 600, letterSpacing: ".18em", fontFamily: "monospace" }}>
                 {selDoc.kind === "summary" ? "INTELLIGENCE SUMMARY" : selDoc.tp}
               </span>
               <button onClick={backFromDoc} style={{
-                background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)",
-                borderRadius: 2, color: "#52525b",
+                background: "rgba(120,180,80,.04)", border: "1px solid rgba(120,180,80,.12)",
+                borderRadius: 2, color: "rgba(120,180,80,.5)",
                 width: 26, height: 26, cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11,
               }}>✕</button>
@@ -1257,9 +1753,44 @@ export default function IntelBoard() {
               </div>
             ) : (
               <div style={{ position: "relative", zIndex: 1 }}>
-                <div style={{ color: "#f4f4f5", fontSize: 16, fontWeight: 600, letterSpacing: ".02em", marginBottom: 14 }}>{selDoc.nm}</div>
-                <div style={{ height: 1, background: "rgba(255,255,255,.07)", marginBottom: 14 }} />
-                <div style={{ color: "#a1a1aa", fontSize: 13, lineHeight: 1.75 }}>{selDoc.sn}</div>
+                {/* Source header */}
+                <div style={{ color: "#e8f0d8", fontSize: 16, fontWeight: 600, letterSpacing: ".02em", marginBottom: 6 }}>{selDoc.nm}</div>
+                {selDoc.url && (
+                  <a href={selDoc.url} target="_blank" rel="noopener noreferrer" style={{
+                    color: "rgba(120,180,80,.7)", fontSize: 11, fontFamily: "var(--font-mono)",
+                    textDecoration: "none", display: "block", marginBottom: 12,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {selDoc.url}
+                  </a>
+                )}
+                <div style={{ height: 1, background: "rgba(120,180,80,.08)", marginBottom: 14 }} />
+
+                {/* Live agent viewer — show Browser Use live stream */}
+                {selDoc.liveUrl && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ color: "rgba(120,180,80,.4)", fontSize: 9, fontWeight: 600, letterSpacing: ".15em", marginBottom: 8 }}>
+                      LIVE AGENT VIEW
+                    </div>
+                    <div style={{
+                      width: "100%", height: 360, borderRadius: 4, overflow: "hidden",
+                      border: "1px solid rgba(120,180,80,.15)",
+                    }}>
+                      <iframe
+                        src={selDoc.liveUrl}
+                        style={{ width: "100%", height: "100%", border: "none" }}
+                        allow="autoplay"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Formatted content — split by newlines, render as paragraphs */}
+                <div style={{ color: "#c8d6b0", fontSize: 13, lineHeight: 1.8 }}>
+                  {(selDoc.sn ? cleanSnippet(selDoc.sn) : "").split("\n").filter(Boolean).map((para, i) => (
+                    <p key={i} style={{ marginBottom: 10 }}>{para}</p>
+                  ))}
+                </div>
               </div>
             )}
           </div>

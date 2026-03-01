@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import pathlib
 import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -86,26 +88,53 @@ class DeepResearcher:
         self._cloud = CloudSkillRunner(settings)
         self._accounts = AccountManager(settings)
         self._semaphore = asyncio.Semaphore(MAX_CONCURRENT_SESSIONS)
-        self._secrets = self._load_platform_secrets()
 
-    def _load_platform_secrets(self) -> dict[str, str]:
-        """Load saved credentials and format as Browser Use secrets.
+        # Load platform credentials from file (only verified entries)
+        self._all_credentials: dict[str, dict] = {}
+        creds_path = pathlib.Path(__file__).resolve().parent.parent / "agent_credentials.json"
+        if creds_path.exists():
+            try:
+                raw = json.loads(creds_path.read_text())
+                self._all_credentials = {
+                    domain: cred for domain, cred in raw.items()
+                    if cred.get("verified") is True
+                }
+                logger.info(
+                    "deep_researcher: loaded {} verified credentials (of {} total)",
+                    len(self._all_credentials), len(raw),
+                )
+            except Exception as exc:
+                logger.warning("deep_researcher: failed to load credentials: {}", exc)
 
-        Returns dict mapping domain -> "email:password" for authenticated sessions.
+    def _secrets_for_skill(self, skill_name: str) -> dict[str, str] | None:
+        """Return only the relevant platform credential for a skill.
+
+        Browser Use Cloud throws 422 when >10 secrets are passed.
+        This returns at most 1 entry: {domain: "email:password"}.
         """
-        secrets: dict[str, str] = {}
-        creds = self._accounts.list_accounts()
-        for platform, cred in creds.items():
-            email = cred.get("email", "")
-            password = cred.get("password", "")
-            if email and password:
-                secrets[platform] = f"{email}:{password}"
-        if secrets:
-            logger.info(
-                "deep_researcher: loaded secrets for {} platforms: {}",
-                len(secrets), list(secrets.keys()),
-            )
-        return secrets
+        domain = SKILL_TO_DOMAIN.get(skill_name)
+        if not domain:
+            return None
+        cred = self._all_credentials.get(domain)
+        if not cred:
+            return None
+        return {domain: f"{cred['email']}:{cred['password']}"}
+
+    def _augment_task_with_auth(self, skill_name: str, task_str: str) -> str:
+        """Append auth instructions to a task prompt if we have credentials."""
+        domain = SKILL_TO_DOMAIN.get(skill_name)
+        if not domain:
+            return task_str
+        cred = self._all_credentials.get(domain)
+        if not cred:
+            return task_str
+        auth_note = (
+            f"\n\nAUTH: If you hit a login wall on {domain}, "
+            f"log in with email '{cred['email']}' and password '{cred['password']}'. "
+            f"If asked for a 2FA/OTP verification code, check the AgentMail inbox "
+            f"at ciri@agentmail.to for the most recent 6-digit code."
+        )
+        return task_str + auth_note
 
     async def research(
         self,
@@ -236,11 +265,10 @@ class DeepResearcher:
         )
 
         # Yield a final meta-result with phase timings for eval/observability
-        import json as _json
         yield AgentResult(
             agent_name="deep_researcher_meta",
             status=AgentStatus.SUCCESS,
-            snippets=[f"phase_timings:{_json.dumps(phase_timings)}"],
+            snippets=[f"phase_timings:{json.dumps(phase_timings)}"],
             duration_seconds=elapsed,
             confidence=1.0,
         )
@@ -452,42 +480,45 @@ class DeepResearcher:
 
         all_skills = core_skills + osint_skills + domain_matched + always_skills
 
-        # Launch all skill tasks with semaphore
+        # Launch all skill tasks with semaphore (augment with auth instructions)
         for skill_name, task_str in all_skills:
+            augmented = self._augment_task_with_auth(skill_name, task_str)
             task = asyncio.ensure_future(
-                self._run_skill_with_semaphore(skill_name, task_str)
+                self._run_skill_with_semaphore(skill_name, augmented)
             )
             skill_tasks.append((skill_name, task_str, task))
 
-        # Yield results as they complete
-        pending_tasks = [t for _, _, t in skill_tasks]
-        task_map = {t: (sn, ts) for sn, ts, t in skill_tasks}
+        # Gather all results then yield them (simpler than as_completed, no race conditions)
+        task_objs = [t for _, _, t in skill_tasks]
+        all_results = await asyncio.gather(*task_objs, return_exceptions=True)
 
-        for coro in asyncio.as_completed(pending_tasks):
+        for idx, result in enumerate(all_results):
+            sn, ts, _ = skill_tasks[idx]
             try:
-                result = await coro
-                skill_name = "unknown"
-                task_str = ""
-                # Find the task in map
-                for t, (sn, ts) in task_map.items():
-                    if t is coro:
-                        skill_name = sn
-                        task_str = ts
-                        break
+                if isinstance(result, Exception):
+                    logger.warning("deep_researcher: skill {} error: {}", sn, str(result))
+                    failed_skills.append((sn, ts))
+                    continue
 
                 if result and result.get("success"):
                     output = result.get("output", "")
-                    label = result.get("label", skill_name)
+                    label = result.get("label", sn)
+                    task_id = result.get("task_id", "")
+                    live_url = result.get("live_url", "")
                     agent_result = AgentResult(
                         agent_name=f"skill_{label}",
                         status=AgentStatus.SUCCESS,
-                        snippets=[output[:500]] if output else [],
+                        snippets=[output] if output else [],
+                        urls_found=[live_url] if live_url else [],
                         profiles=[
                             SocialProfile(
                                 platform=label,
                                 url="",
                                 display_name=person,
-                                raw_data={"cloud_output": output},
+                                raw_data={
+                                    "task_id": task_id,
+                                    "live_url": live_url or "",
+                                },
                             )
                         ],
                         confidence=self._compute_confidence(output, person),
@@ -500,19 +531,22 @@ class DeepResearcher:
                             label,
                         )
                 else:
-                    # Track failure for Phase 3 retry
-                    for t, (sn, ts) in task_map.items():
-                        if t is coro:
-                            failed_skills.append((sn, ts))
-                            break
+                    failed_skills.append((sn, ts))
 
             except Exception as exc:
-                logger.warning("deep_researcher: skill error: {}", str(exc))
+                logger.warning("deep_researcher: skill {} error: {}", sn, str(exc))
+                failed_skills.append((sn, ts))
 
     # Slow platforms that need more time (login flows, heavy JS, etc.)
     _SLOW_SKILLS = frozenset({
         "linkedin_company_posts", "youtube_filmography", "pinterest_pins",
         "instagram_posts", "company_employees",
+    })
+
+    # Auth-heavy skills that need extra steps for login flows
+    _AUTH_HEAVY_SKILLS = frozenset({
+        "instagram_posts", "linkedin_company_posts", "facebook_page",
+        "company_employees", "pinterest_pins",
     })
 
     @traced("deep_researcher.run_skill", tags=["phase:1"])
@@ -521,14 +555,22 @@ class DeepResearcher:
     ) -> dict | None:
         """Run a skill task, respecting concurrency limit.
 
-        Passes saved platform credentials as secrets so Browser Use
-        can authenticate on login-walled platforms.
+        Passes per-skill credentials (max 1-2 keys) to avoid >10 key 422 error.
+        Uses higher max_steps for auth-heavy platforms that need login flows.
         """
         timeout = 120.0 if skill_name in self._SLOW_SKILLS else 60.0
+        if skill_name in self._AUTH_HEAVY_SKILLS:
+            max_steps = 15
+        elif skill_name in self._SLOW_SKILLS:
+            max_steps = 8
+        else:
+            max_steps = 5
+        secrets = self._secrets_for_skill(skill_name)
         async with self._semaphore:
             return await self._cloud.run_skill(
                 skill_name, task_str, timeout=timeout,
-                secrets=self._secrets if self._secrets else None,
+                max_steps=max_steps,
+                secrets=secrets,
             )
 
     # ─── Phase 2: Deep extraction + SixtyFour deep search + dark web ─────
@@ -618,7 +660,6 @@ class DeepResearcher:
                 async with self._semaphore:
                     return await self._cloud.run_task(
                         prompt, max_steps=8, timeout=60.0,
-                        secrets=self._secrets if self._secrets else None,
                     )
             task = asyncio.ensure_future(_run_wow(label, task_str))
             tasks.append(task)
@@ -660,35 +701,49 @@ class DeepResearcher:
                         yield AgentResult(
                             agent_name="hibp_breach",
                             status=AgentStatus.SUCCESS,
-                            snippets=[output[:500]] if output else [],
+                            snippets=[output] if output else [],
                             confidence=0.9,
                         )
 
                 elif label.startswith("wow:") and isinstance(result, dict) and result.get("success"):
-                    # High-impact freeform task — use specific wow label as agent_name
                     output = result.get("output", "")
                     wow_name = label.replace("wow:", "")
+                    task_id = result.get("task_id", "")
+                    live_url = result.get("live_url", "")
+                    # Strict verification for wow tasks — require FULL name
+                    if not self._verify_result_strict(output, person):
+                        logger.info("deep_researcher: wow_{} filtered — wrong person", wow_name)
+                        continue
                     yield AgentResult(
                         agent_name=f"wow_{wow_name}",
                         status=AgentStatus.SUCCESS,
-                        snippets=[output[:500]] if output else [],
+                        snippets=[output] if output else [],
+                        urls_found=[live_url] if live_url else [],
+                        profiles=[SocialProfile(
+                            platform=wow_name,
+                            url="",
+                            display_name=person,
+                            raw_data={"task_id": task_id, "live_url": live_url or ""},
+                        )],
                         confidence=self._compute_confidence(output, person),
                     )
 
                 elif isinstance(result, dict) and result.get("success"):
                     output = result.get("output", "")
                     source_url = label.replace("extract:", "")
+                    task_id = result.get("task_id", "")
+                    live_url = result.get("live_url", "")
                     yield AgentResult(
                         agent_name="deep_extract",
                         status=AgentStatus.SUCCESS,
-                        snippets=[output[:500]] if output else [],
+                        snippets=[output] if output else [],
                         urls_found=[source_url] if source_url.startswith("http") else [],
                         profiles=[
                             SocialProfile(
                                 platform="web",
                                 url=source_url,
                                 display_name=person,
-                                raw_data={"extracted": output},
+                                raw_data={"task_id": task_id, "live_url": live_url or ""},
                             )
                         ] if source_url.startswith("http") else [],
                         confidence=self._compute_confidence(output, person),
@@ -712,7 +767,6 @@ class DeepResearcher:
             )
             return await self._cloud.run_task(
                 task, max_steps=8, timeout=60.0,
-                secrets=self._secrets if self._secrets else None,
             )
 
     # ─── Phase 3: Verification loop + account creation ───────────────────
@@ -722,20 +776,25 @@ class DeepResearcher:
         person: str,
         failed_skills: list[tuple[str, str]],
     ) -> AsyncGenerator[AgentResult, None]:
-        """Retry failed skills after creating accounts on login-walled platforms."""
+        """Retry failed skills with auth — check saved credentials first."""
         for skill_name, task_str in failed_skills:
             domain = SKILL_TO_DOMAIN.get(skill_name)
             if not domain:
                 continue
 
-            signup_url = PLATFORM_SIGNUP_URLS.get(domain)
-            if not signup_url:
-                continue
+            # Check saved verified credentials FIRST (avoids account creation)
+            cred = self._all_credentials.get(domain)
+            if cred:
+                creds = {"email": cred["email"], "password": cred["password"]}
+            else:
+                # Fall back to account creation
+                signup_url = PLATFORM_SIGNUP_URLS.get(domain)
+                if not signup_url:
+                    continue
+                creds = await self._accounts.ensure_account(
+                    domain, signup_url, person_name="Specter Agent"
+                )
 
-            # Try to ensure we have an account
-            creds = await self._accounts.ensure_account(
-                domain, signup_url, person_name="Specter Agent"
-            )
             if not creds:
                 logger.info(
                     "deep_researcher: no creds for {}, skipping retry",
@@ -743,7 +802,8 @@ class DeepResearcher:
                 )
                 continue
 
-            # Retry with authenticated session
+            # Augment task with auth instructions and retry
+            augmented = self._augment_task_with_auth(skill_name, task_str)
             logger.info(
                 "deep_researcher: retrying {} with auth ({})",
                 skill_name,
@@ -753,8 +813,9 @@ class DeepResearcher:
                 async with self._semaphore:
                     result = await self._cloud.run_skill(
                         skill_name,
-                        task_str,
-                        timeout=60.0,
+                        augmented,
+                        timeout=120.0,
+                        max_steps=20,
                         secrets={
                             domain: f"{creds['email']}:{creds['password']}"
                         },
@@ -762,10 +823,12 @@ class DeepResearcher:
 
                 if result and result.get("success"):
                     output = result.get("output", "")
+                    task_id = result.get("task_id", "")
+                    live_url = result.get("live_url", "")
                     yield AgentResult(
                         agent_name=f"skill_{skill_name}_retry",
                         status=AgentStatus.SUCCESS,
-                        snippets=[output[:500]] if output else [],
+                        snippets=[output] if output else [],
                         profiles=[
                             SocialProfile(
                                 platform=skill_name,
@@ -798,6 +861,19 @@ class DeepResearcher:
         name_parts = person_name.lower().split()
         all_text = " ".join(result.snippets).lower()
         return any(part in all_text for part in name_parts)
+
+    @staticmethod
+    def _verify_result_strict(output: str, person_name: str) -> bool:
+        """Strict verification — ALL name parts must appear in output.
+
+        Used for wow tasks (court records, political donations etc.) that
+        grab whatever they find on the page, often for wrong people.
+        """
+        if not output:
+            return False
+        output_lower = output.lower()
+        name_parts = person_name.lower().split()
+        return all(part in output_lower for part in name_parts)
 
     @staticmethod
     def _compute_confidence(output: str, person_name: str) -> float:

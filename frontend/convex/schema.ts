@@ -1,4 +1,4 @@
-// SPECTER — Convex Schema
+// JARVIS — Convex Schema
 // Real-time person intelligence database
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";

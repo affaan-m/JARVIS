@@ -10,6 +10,7 @@ export type StreamStatus = "disconnected" | "connecting" | "live" | "error";
 
 interface UseGlassesStreamReturn {
   videoRef: React.RefObject<HTMLVideoElement | null>;
+  audioTrack: MediaStreamTrack | null;
   status: StreamStatus;
   connect: (roomCode: string) => void;
   connectWebcam: () => void;
@@ -30,6 +31,7 @@ export function useGlassesStream(): UseGlassesStreamReturn {
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const [audioTrack, setAudioTrack] = useState<MediaStreamTrack | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState<StreamStatus>("disconnected");
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +53,10 @@ export function useGlassesStream(): UseGlassesStreamReturn {
       streamRef.current.getTracks().forEach(t => t.stop());
     }
     streamRef.current = null;
+    setAudioTrack(prev => {
+      if (prev) prev.stop();
+      return null;
+    });
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
@@ -179,16 +185,25 @@ export function useGlassesStream(): UseGlassesStreamReturn {
 
             // Add recvonly video transceiver so the PC expects incoming video
             pc.addTransceiver("video", { direction: "recvonly" });
+            // Add recvonly audio transceiver (silently ignored if SDP has no audio m-line)
+            pc.addTransceiver("audio", { direction: "recvonly" });
 
             // Store stream on track — but do NOT set srcObject yet
             pc.ontrack = (event) => {
               console.log(
-                "[WebRTC] ontrack fired, streams:",
+                "[WebRTC] ontrack fired, kind:",
+                event.track.kind,
+                "streams:",
                 event.streams.length
               );
-              const stream = event.streams[0];
-              if (stream) {
-                streamRef.current = stream;
+              if (event.track.kind === "audio") {
+                console.log("[WebRTC] Audio track received from glasses mic");
+                setAudioTrack(event.track);
+              } else {
+                const stream = event.streams[0];
+                if (stream) {
+                  streamRef.current = stream;
+                }
               }
             };
 
@@ -330,5 +345,5 @@ export function useGlassesStream(): UseGlassesStreamReturn {
     };
   }, [clearConnectionTimeout]);
 
-  return { videoRef, status, connect, connectWebcam, disconnect, error };
+  return { videoRef, audioTrack, status, connect, connectWebcam, disconnect, error };
 }

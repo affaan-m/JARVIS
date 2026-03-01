@@ -63,12 +63,12 @@ class SixtyFourClient:
     def configured(self) -> bool:
         return bool(self._api_key)
 
-    def _get_client(self) -> httpx.AsyncClient:
+    def _get_client(self, timeout: float = 30.0) -> httpx.AsyncClient:
         if self._client is None:
             self._client = httpx.AsyncClient(
                 base_url=BASE_URL,
                 headers={"x-api-key": self._api_key or ""},
-                timeout=30.0,
+                timeout=timeout,
             )
         return self._client
 
@@ -108,8 +108,11 @@ class SixtyFourClient:
         }
 
         try:
-            logger.info("sixtyfour: enrich_lead for '{}'", name)
-            resp = await client.post("/enrich-lead", json=payload)
+            logger.info("sixtyfour: enrich_lead for '{}' (timeout=180s)", name)
+            resp = await client.post(
+                "/enrich-lead", json=payload,
+                timeout=180.0,  # Agentic endpoint — can take 60-120s
+            )
             resp.raise_for_status()
             data = resp.json()
 
@@ -155,8 +158,11 @@ class SixtyFourClient:
                 success=False,
                 error=f"HTTP {exc.response.status_code}",
             )
+        except httpx.TimeoutException as exc:
+            logger.error("sixtyfour: enrich_lead TIMEOUT ({}): {}", type(exc).__name__, exc)
+            return EnrichResult(success=False, error=f"Timeout: {type(exc).__name__}")
         except Exception as exc:
-            logger.error("sixtyfour: enrich_lead error: {}", exc)
+            logger.error("sixtyfour: enrich_lead error ({}): {}", type(exc).__name__, exc)
             return EnrichResult(success=False, error=str(exc))
 
     async def start_deep_search(

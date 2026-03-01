@@ -112,13 +112,30 @@ export function Sidebar({ people, activePerson, onSelect, search, setSearch, onS
                 onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLDivElement).style.background = "rgba(120,180,80,.06)"; }}
                 onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
               >
-                {/* Status dot */}
-                <div style={{
-                  width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-                  background: dotColor,
-                  boxShadow: p.status === "scanning" ? `0 0 6px ${dotColor}40` : "none",
-                  animation: p.status === "scanning" ? "scanPulse 2s ease-in-out infinite" : "none",
-                }} />
+                {/* Avatar or status dot */}
+                {p.photoUrl ? (
+                  <div style={{
+                    width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+                    overflow: "hidden",
+                    border: `1.5px solid ${isActive ? "rgba(74,222,128,.4)" : "rgba(120,180,80,.15)"}`,
+                    boxShadow: p.status === "scanning" ? `0 0 8px ${dotColor}50` : "none",
+                  }}>
+                    <img src={p.photoUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  </div>
+                ) : (
+                  <div style={{
+                    width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+                    background: isActive ? "rgba(74,222,128,.12)" : "rgba(120,180,80,.06)",
+                    border: `1.5px solid ${isActive ? "rgba(74,222,128,.25)" : "rgba(120,180,80,.1)"}`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    boxShadow: p.status === "scanning" ? `0 0 8px ${dotColor}50` : "none",
+                    animation: p.status === "scanning" ? "scanPulse 2s ease-in-out infinite" : "none",
+                  }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isActive ? "rgba(74,222,128,.5)" : "rgba(120,180,80,.25)"} strokeWidth="2">
+                      <circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+                    </svg>
+                  </div>
+                )}
                 {/* Name */}
                 <div style={{
                   color: isActive ? "#e8f0d8" : "rgba(120,180,80,.55)", fontSize: 12.5, fontWeight: isActive ? 600 : 500,
@@ -127,8 +144,12 @@ export function Sidebar({ people, activePerson, onSelect, search, setSearch, onS
                 }}>
                   {p.name}
                 </div>
-                {/* Source count */}
-                <div style={{ color: "rgba(120,180,80,.25)", fontSize: 10, fontWeight: 500, flexShrink: 0 }}>
+                {/* Source count — pulse when scanning */}
+                <div style={{
+                  color: p.status === "scanning" ? "rgba(245,158,11,.7)" : "rgba(120,180,80,.25)",
+                  fontSize: 10, fontWeight: p.status === "scanning" ? 600 : 500, flexShrink: 0,
+                  animation: p.status === "scanning" ? "scanPulse 2s ease-in-out infinite" : "none",
+                }}>
                   {p.sources.length}
                 </div>
               </div>
