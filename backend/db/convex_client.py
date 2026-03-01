@@ -120,3 +120,46 @@ class ConvexGateway:
         except Exception as exc:
             logger.error("Convex store_capture failed: {}", exc)
             raise
+
+    async def list_persons_with_dossiers(self) -> list[dict[str, Any]]:
+        logger.info("ConvexGateway.list_persons_with_dossiers")
+        if not self.configured:
+            raise RuntimeError("Convex is not configured (CONVEX_URL missing)")
+
+        try:
+            result = await self._query("persons:listAll", {})
+            if not isinstance(result, list):
+                return []
+            return [
+                p for p in result
+                if isinstance(p, dict) and p.get("dossier") is not None
+            ]
+        except Exception as exc:
+            logger.error("Convex list_persons_with_dossiers failed: {}", exc)
+            raise
+
+    async def create_connection(
+        self,
+        person_a_id: str,
+        person_b_id: str,
+        relationship_type: str,
+        description: str,
+    ) -> str:
+        logger.info(
+            "ConvexGateway.create_connection a={} b={} type={}",
+            person_a_id, person_b_id, relationship_type,
+        )
+        if not self.configured:
+            raise RuntimeError("Convex is not configured (CONVEX_URL missing)")
+
+        try:
+            result = await self._mutation("connections:create", {
+                "personAId": person_a_id,
+                "personBId": person_b_id,
+                "relationshipType": relationship_type,
+                "description": description,
+            })
+            return result if isinstance(result, str) else ""
+        except Exception as exc:
+            logger.error("Convex create_connection failed: {}", exc)
+            raise

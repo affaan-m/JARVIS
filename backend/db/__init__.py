@@ -24,3 +24,17 @@ class DatabaseGateway(Protocol):
     async def store_capture(self, capture_id: str, metadata: dict[str, Any]) -> str:
         """Persist capture metadata. Returns the stored document ID."""
         ...
+
+    async def list_persons_with_dossiers(self) -> list[dict[str, Any]]:
+        """Return all persons that have a completed dossier."""
+        ...
+
+    async def create_connection(
+        self,
+        person_a_id: str,
+        person_b_id: str,
+        relationship_type: str,
+        description: str,
+    ) -> str:
+        """Create a connection between two persons. Returns connection ID."""
+        ...

@@ -16,7 +16,10 @@ from identification import FaceDetector
 from identification.embedder import ArcFaceEmbedder
 from identification.models import FaceDetectionRequest, FaceSearchRequest
 from identification.search_manager import FaceSearchManager
+from observability.laminar import traced
+from synthesis.connections import detect_connections
 from synthesis.engine import GeminiSynthesisEngine
+from synthesis.models import DossierReport
 from synthesis.models import SocialProfile as SynthSocialProfile
 from synthesis.models import SynthesisRequest
 
@@ -56,6 +59,7 @@ class CapturePipeline:
         self._orchestrator = orchestrator
         self._synthesis = synthesis_engine
 
+    @traced("pipeline.process")
     async def process(
         self,
         capture_id: str,
@@ -195,6 +199,7 @@ class CapturePipeline:
             success=True,
         )
 
+    @traced("pipeline.identify_face")
     async def _identify_face(
         self, embedding: list[float], image_data: bytes
     ) -> str | None:
@@ -228,6 +233,7 @@ class CapturePipeline:
             logger.error("Face search crashed: {}", exc)
             return None
 
+    @traced("pipeline.enrich_person")
     async def _enrich_person(self, person_id: str, person_name: str) -> bool:
         """Run Exa enrichment + browser research in parallel, then synthesize.
 
@@ -286,17 +292,60 @@ class CapturePipeline:
 
         await self._db.update_person(person_id, update_data)
 
+        # Detect connections against all existing persons
+        if synthesis_result.dossier:
+            await self._detect_and_store_connections(person_id, synthesis_result.dossier)
+
         logger.info(
             "Enrichment complete for person={} name={}",
             person_id, person_name,
         )
         return True
 
+    async def _detect_and_store_connections(
+        self, person_id: str, dossier: DossierReport,
+    ) -> None:
+        """Compare new person against all existing persons and store any connections."""
+        try:
+            existing = await self._db.list_persons_with_dossiers()
+        except Exception as exc:
+            logger.error("Failed to list persons for connection detection: {}", exc)
+            return
+
+        # Build list with person_id key expected by detect_connections
+        existing_with_ids = []
+        for p in existing:
+            pid = p.get("_id") or p.get("person_id", "")
+            existing_with_ids.append({**p, "person_id": pid})
+
+        candidates = detect_connections(person_id, dossier, existing_with_ids)
+
+        for candidate in candidates:
+            try:
+                await self._db.create_connection(
+                    person_a_id=candidate.person_a_id,
+                    person_b_id=candidate.person_b_id,
+                    relationship_type=candidate.relationship_type,
+                    description=candidate.description,
+                )
+                logger.info(
+                    "Created connection: {} <-> {} ({})",
+                    candidate.person_a_id, candidate.person_b_id,
+                    candidate.relationship_type,
+                )
+            except Exception as exc:
+                logger.error(
+                    "Failed to store connection {} <-> {}: {}",
+                    candidate.person_a_id, candidate.person_b_id, exc,
+                )
+
+    @traced("pipeline.exa_enrichment")
     async def _run_exa(self, person_name: str) -> EnrichmentResult | None:
         if not self._exa:
             return None
         return await self._exa.enrich_person(EnrichmentRequest(name=person_name))
 
+    @traced("pipeline.browser_research")
     async def _run_browser_research(self, person_name: str) -> OrchestratorResult | None:
         if not self._orchestrator:
             return None
