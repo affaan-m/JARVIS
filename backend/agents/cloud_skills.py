@@ -246,6 +246,7 @@ class CloudSkillRunner:
         person_name: str,
         *,
         timeout: float = 60.0,
+        secrets: dict[str, str] | None = None,
     ) -> dict | None:
         """Navigate to a URL and extract maximal person information.
 
@@ -260,5 +261,5 @@ class CloudSkillRunner:
             f"Be thorough — extract everything visible on the page."
         )
         return await self.run_task(
-            task, max_steps=8, timeout=timeout
+            task, max_steps=8, timeout=timeout, secrets=secrets,
         )

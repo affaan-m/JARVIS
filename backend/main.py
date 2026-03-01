@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
@@ -23,6 +23,7 @@ from db.memory_gateway import InMemoryDatabaseGateway
 from enrichment.exa_client import ExaEnrichmentClient
 from identification.detector import MediaPipeFaceDetector
 from identification.embedder import ArcFaceEmbedder
+from identification.search_manager import FaceSearchManager
 from memory.supermemory_client import SuperMemoryClient
 from observability.laminar import initialize_laminar
 from pipeline import CapturePipeline
@@ -48,6 +49,11 @@ from tasks import TASK_PHASES
 
 settings = get_settings()
 
+# Log to file so we can tail from CLI
+import sys
+logger.add("/tmp/ciri_backend.log", rotation="10 MB", level="DEBUG",
+           format="{time:HH:mm:ss.SSS} | {level:<7} | {name}:{function}:{line} | {message}")
+
 # Initialize Laminar tracing (no-op if LMNR_PROJECT_API_KEY not set)
 initialize_laminar(settings)
 
@@ -58,6 +64,10 @@ embedder = ArcFaceEmbedder()
 # Database: use Convex when configured, else in-memory
 convex_gw = ConvexGateway(settings)
 db_gateway = convex_gw if convex_gw.configured else InMemoryDatabaseGateway()
+
+# Face search: PimEyes (primary) + reverse image search (fallback)
+# PimEyes now uses direct API with cookies — no email/password needed
+face_searcher = FaceSearchManager(settings)
 
 # Enrichment + research + synthesis (None when API keys missing)
 exa_client = ExaEnrichmentClient(settings) if settings.exa_api_key else None
@@ -75,6 +85,7 @@ pipeline = CapturePipeline(
     detector=detector,
     embedder=embedder,
     db=db_gateway,
+    face_searcher=face_searcher,
     exa_client=exa_client,
     orchestrator=orchestrator,
     synthesis_engine=synthesis_engine,
@@ -86,7 +97,11 @@ if deep_researcher:
     pipeline._deep_researcher = deep_researcher
 
 capture_service = CaptureService(pipeline=pipeline)
-frame_handler = FrameHandler()
+frame_handler = FrameHandler(
+    face_detector=detector,
+    embedder=embedder,
+    face_searcher=face_searcher,
+)
 bu_client = BrowserUseClient(settings)
 upload_file = File(...)
 
@@ -148,12 +163,13 @@ _share_url_cache: dict[str, str] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info(
-        "SPECTER started — det={} emb={} db={} exa={} orch={} synth={} (primary) synth_fallback={} supermemory={}",
+        "SPECTER started — det={} emb={} db={} face_search={} exa={} deep_researcher={} synth={} (primary) synth_fallback={} supermemory={}",
         detector.__class__.__name__,
         embedder.__class__.__name__,
         db_gateway.__class__.__name__,
+        face_searcher is not None,
         exa_client is not None,
-        orchestrator is not None,
+        deep_researcher is not None,
         synthesis_engine.__class__.__name__ if synthesis_engine else None,
         synthesis_fallback.__class__.__name__ if synthesis_fallback else None,
         supermemory_client is not None,
@@ -238,6 +254,7 @@ async def capture_frame(submission: FrameSubmission) -> FrameProcessedResponse:
         frame_b64=submission.frame,
         timestamp=submission.timestamp,
         source=submission.source,
+        target=submission.target,
     )
     return FrameProcessedResponse(**result)
 
@@ -293,11 +310,42 @@ async def get_person(person_id: str):
     return person
 
 
+@app.get("/api/pipeline/status")
+async def pipeline_status():
+    """Diagnostic: show what the face identification pipeline is doing right now."""
+    handler_state = {
+        "seen_tracks": list(frame_handler._seen_tracks),
+        "spawned_identifications": list(frame_handler._spawned),
+        "identifications": {
+            tid: {
+                "status": ident.status,
+                "name": ident.name,
+                "person_id": ident.person_id,
+                "error": ident.error,
+            }
+            for tid, ident in frame_handler._identifications.items()
+        },
+        "face_detector_configured": frame_handler._face_detector is not None,
+        "embedder_configured": frame_handler._embedder is not None,
+        "face_searcher_configured": frame_handler._face_searcher is not None,
+    }
+    return {
+        "frame_handler": handler_state,
+        "services": settings.service_flags(),
+        "deep_researcher": deep_researcher is not None,
+        "synthesis_engine": synthesis_engine is not None,
+    }
+
+
 @app.get("/api/research/{person_name}/stream")
-async def stream_research(person_name: str):
+async def stream_research(person_name: str, image_url: str | None = None):
     """SSE endpoint: stream research results as they arrive.
 
-    Each event contains an AgentResult JSON. Final event is type='complete'.
+    Events:
+      - init: {person_id, live_session_id, live_url} — sent first
+      - result: AgentResult JSON — sent per agent
+      - complete: {} — sent when all agents finish
+
     Frontend can consume with EventSource or fetch + ReadableStream.
     """
     if not deep_researcher:
@@ -306,18 +354,112 @@ async def stream_research(person_name: str):
             detail="Browser Use API key not configured — streaming unavailable",
         )
 
-    person_id = f"stream_{uuid4().hex[:12]}"
+    import json as _json
 
     async def event_generator():
-        from agents.models import ResearchRequest
+        # 1. Create person in Convex so frontend can subscribe
+        person_id = None
+        try:
+            person_id = await db_gateway.store_person(
+                f"stream_{uuid4().hex[:12]}",
+                {
+                    "name": person_name,
+                    "photoUrl": image_url or "",
+                    "confidence": 0.9,
+                    "status": "researching",
+                },
+            )
+        except Exception as exc:
+            logger.warning("Failed to create person in Convex: {}", exc)
 
-        request = ResearchRequest(person_name=person_name)
+        # Send init event IMMEDIATELY so frontend gets feedback right away
+        yield {
+            "event": "init",
+            "data": _json.dumps({
+                "person_id": person_id,
+                "person_name": person_name,
+                "live_session_id": None,
+                "live_url": None,
+            }),
+        }
+        logger.info("SSE stream started for {}", person_name)
+
+        # 2. Spawn live Browser Use session (X/Twitter) in background — don't block pipeline
+        live_session_id = None
+        live_url = None
+
+        async def spawn_live_session():
+            nonlocal live_session_id, live_url
+            try:
+                twitter_cfg = SOURCE_CONFIGS["twitter"]
+                session = await bu_client.create_session(start_url=twitter_cfg["start_url"])
+                live_session_id = session["id"]
+                live_url = session.get("liveUrl")
+                prompt = twitter_cfg["prompt"].replace("{name}", person_name)
+                await bu_client.create_task(
+                    session_id=live_session_id,
+                    task=prompt,
+                    start_url=twitter_cfg["start_url"],
+                )
+                logger.info("Live X session started: {} url={}", live_session_id, live_url)
+            except Exception as exc:
+                logger.warning("Failed to spawn live X session: {}", exc)
+
+        # Launch session spawn in background — doesn't block research
+        import asyncio as _asyncio
+        _asyncio.create_task(spawn_live_session())
+
+        # 3. Stream research results
+        all_snippets: list[str] = []
+        all_urls: list[str] = []
+        all_sources: list[str] = []
+        agent_data: dict[str, str] = {}
+
         async for result in pipeline.stream_research(person_name, person_id):
+            all_snippets.extend(result.snippets[:3])
+            all_urls.extend(result.urls_found[:5])
+            all_sources.append(result.agent_name)
+            # Collect full agent output for richer synthesis
+            agent_data[result.agent_name] = "\n".join(result.snippets[:10])
             yield {
                 "event": "result",
                 "data": result.model_dump_json(),
             }
-        yield {"event": "complete", "data": "{}"}
+
+        # 4. Run synthesis on collected data and push dossier to Convex
+        if person_id and synthesis_engine:
+            try:
+                from synthesis.models import SynthesisRequest
+                from synthesis.models import SocialProfile as SynthSocialProfile
+
+                synth_request = SynthesisRequest(
+                    person_name=person_name,
+                    enrichment_snippets=all_snippets[:50],
+                    social_profiles=[],
+                    raw_agent_data=agent_data,
+                )
+                synth_result = await synthesis_engine.synthesize(synth_request)
+                if synth_result.success and synth_result.dossier:
+                    dossier = synth_result.dossier
+                    await db_gateway.update_person(person_id, {
+                        "status": "enriched",
+                        "summary": synth_result.summary,
+                        "occupation": synth_result.occupation,
+                        "organization": synth_result.organization,
+                        "dossier": dossier.model_dump(),
+                    })
+                    yield {
+                        "event": "dossier",
+                        "data": _json.dumps(dossier.to_frontend_dict()),
+                    }
+            except Exception as exc:
+                logger.error("Synthesis failed during stream: {}", exc)
+
+        yield {"event": "complete", "data": _json.dumps({
+            "person_id": person_id,
+            "total_sources": len(all_sources),
+            "total_urls": len(all_urls),
+        })}
 
     return EventSourceResponse(event_generator())
 
@@ -432,3 +574,62 @@ async def get_session_status(session_id: str) -> SessionStatusResponse:
         share_url=share_url,
         task=task_info,
     )
+
+
+# --- Browser Use Webhooks for observability ---
+
+
+@app.post("/api/webhooks/browser-use")
+async def browser_use_webhook(request: Request):
+    """Receive Browser Use task status updates for observability.
+
+    Events: agent.task.status_update (started, finished, stopped)
+    Configure at: cloud.browser-use.com/settings?tab=webhooks
+    """
+    import hashlib
+    import hmac
+    import json as _json
+
+    body = await request.body()
+
+    # Signature verification (optional — skip if no secret configured)
+    signature = request.headers.get("X-Webhook-Signature")
+    webhook_secret = getattr(settings, "browser_use_webhook_secret", None)
+    if webhook_secret and signature:
+        expected = hmac.new(
+            webhook_secret.encode(), body, hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(expected, signature):
+            logger.warning("Browser Use webhook: invalid signature")
+            raise HTTPException(status_code=401, detail="Invalid signature")
+
+    try:
+        payload = _json.loads(body)
+    except _json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    event_type = payload.get("type", "unknown")
+    timestamp = payload.get("timestamp", "")
+    data = payload.get("payload", {})
+    task_id = data.get("taskId", "")
+    status = data.get("status", "")
+    session_id = data.get("sessionId", "")
+
+    logger.info(
+        "BU webhook: type={} task={} status={} session={} at={}",
+        event_type, task_id[:12], status, session_id[:12], timestamp,
+    )
+
+    # Push to Convex for real-time observability in frontend
+    if event_type == "agent.task.status_update" and convex_gw.configured:
+        try:
+            await convex_gw.store_intel_fragment(
+                person_id="__system__",
+                source=f"browser_use:{status}",
+                content=f"Task {task_id[:12]} → {status}",
+                data_type="agent_event",
+            )
+        except Exception as exc:
+            logger.warning("Failed to push BU webhook to Convex: {}", exc)
+
+    return {"ok": True}

@@ -249,6 +249,18 @@ async def run_pipeline_for_subject(
         t_research = time.monotonic()
         agent_results = []
         async for result in researcher.research(request):
+            # Extract phase timings from the meta result
+            if result.agent_name == "deep_researcher_meta":
+                import json as _json
+                for snippet in result.snippets:
+                    if snippet.startswith("phase_timings:"):
+                        try:
+                            pipeline_meta["phase_timings"] = _json.loads(
+                                snippet.removeprefix("phase_timings:")
+                            )
+                        except (ValueError, _json.JSONDecodeError):
+                            pass
+                continue
             agent_results.append(result)
             all_snippets.extend(result.snippets)
             all_urls.extend(result.urls_found)
@@ -439,6 +451,7 @@ async def evaluate_person(
     false_positive_rate = pipeline_meta.get("false_positive_rate", 0.0)
     urls_discovered = pipeline_meta.get("urls_discovered", 0)
     platforms = pipeline_meta.get("platforms_covered", [])
+    raw_phase_timings = pipeline_meta.get("phase_timings", {})
 
     return EvalScores(
         subject_name=person_name,
@@ -458,6 +471,7 @@ async def evaluate_person(
         elapsed_s=time.monotonic() - t0,
         info_density=info_density,
         false_positive_rate=false_positive_rate,
+        phase_timings={k: float(v) for k, v in raw_phase_timings.items()} if isinstance(raw_phase_timings, dict) else {},
         sources_count=len(pipeline_meta.get("sources", [])),
         urls_discovered=urls_discovered,
         platforms_covered=len(platforms),
@@ -503,6 +517,11 @@ def _print_scores(scores: EvalScores) -> None:
         scores.platforms_covered,
         scores.elapsed_s,
     )
+    if scores.phase_timings:
+        timings_str = " | ".join(
+            f"{k}={v:.1f}s" for k, v in sorted(scores.phase_timings.items())
+        )
+        logger.info("         phases: {}", timings_str)
 
 
 def _print_summary(results: list[EvalScores]) -> None:

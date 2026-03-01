@@ -8,10 +8,18 @@ export interface Detection {
   track_id: number | null;
 }
 
+export interface FaceIdentification {
+  track_id: number;
+  status: "identifying" | "identified" | "failed";
+  name: string | null;
+  person_id: string | null;
+}
+
 export interface FrameCaptureResponse {
   capture_id: string;
   detections: Detection[];
   new_persons: number;
+  identifications: FaceIdentification[];
   timestamp: number;
   source: string;
 }

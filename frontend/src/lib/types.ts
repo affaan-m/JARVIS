@@ -93,4 +93,5 @@ export interface IntelPerson {
   status: IntelPersonStatus;
   summary: IntelSummary;
   sources: IntelSource[];
+  dossier?: Dossier;
 }

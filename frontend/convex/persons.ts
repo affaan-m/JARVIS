@@ -215,23 +215,37 @@ export const update = mutation({
       patch.status = mappedStatus;
     }
 
-    if (data.summary) patch.dossier = {
-      summary: data.summary,
-      title: data.occupation ?? undefined,
-      company: data.organization ?? undefined,
-      workHistory: data.dossier?.work_history ?? [],
-      education: data.dossier?.education ?? [],
-      socialProfiles: data.dossier?.social_profiles ?? {
-        linkedin: undefined,
-        twitter: undefined,
-        instagram: undefined,
-        github: undefined,
-        website: undefined,
-      },
-      notableActivity: data.dossier?.notable_activity ?? [],
-      conversationHooks: data.dossier?.conversation_hooks ?? [],
-      riskFlags: data.dossier?.risk_flags ?? [],
-    };
+    if (data.summary) {
+      // Strip null/undefined from social profiles (Convex v.optional rejects null)
+      const rawSocial = data.dossier?.social_profiles ?? {};
+      const socialProfiles: Record<string, string> = {};
+      for (const [k, v] of Object.entries(rawSocial)) {
+        if (typeof v === "string" && v.length > 0) socialProfiles[k] = v;
+      }
+
+      patch.dossier = {
+        summary: data.summary,
+        ...(data.occupation ? { title: data.occupation } : {}),
+        ...(data.organization ? { company: data.organization } : {}),
+        workHistory: (data.dossier?.work_history ?? []).map(
+          (w: Record<string, unknown>) => ({
+            role: String(w.role ?? ""),
+            company: String(w.company ?? ""),
+            ...(w.period ? { period: String(w.period) } : {}),
+          })
+        ),
+        education: (data.dossier?.education ?? []).map(
+          (e: Record<string, unknown>) => ({
+            school: String(e.school ?? e.institution ?? ""),
+            ...(e.degree ? { degree: String(e.degree) } : {}),
+          })
+        ),
+        socialProfiles,
+        notableActivity: (data.dossier?.notable_activity ?? []).map(String),
+        conversationHooks: (data.dossier?.conversation_hooks ?? []).map(String),
+        riskFlags: (data.dossier?.risk_flags ?? []).map(String),
+      };
+    }
 
     await ctx.db.patch(match._id, patch);
   },

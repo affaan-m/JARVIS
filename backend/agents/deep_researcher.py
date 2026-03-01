@@ -27,6 +27,7 @@ from config import Settings
 from enrichment.exa_client import ExaEnrichmentClient
 from enrichment.models import EnrichmentRequest
 from enrichment.sixtyfour_client import SixtyFourClient
+from observability.laminar import traced
 
 # Platform signup URLs for autonomous account creation
 PLATFORM_SIGNUP_URLS = {
@@ -85,6 +86,26 @@ class DeepResearcher:
         self._cloud = CloudSkillRunner(settings)
         self._accounts = AccountManager(settings)
         self._semaphore = asyncio.Semaphore(MAX_CONCURRENT_SESSIONS)
+        self._secrets = self._load_platform_secrets()
+
+    def _load_platform_secrets(self) -> dict[str, str]:
+        """Load saved credentials and format as Browser Use secrets.
+
+        Returns dict mapping domain -> "email:password" for authenticated sessions.
+        """
+        secrets: dict[str, str] = {}
+        creds = self._accounts.list_accounts()
+        for platform, cred in creds.items():
+            email = cred.get("email", "")
+            password = cred.get("password", "")
+            if email and password:
+                secrets[platform] = f"{email}:{password}"
+        if secrets:
+            logger.info(
+                "deep_researcher: loaded secrets for {} platforms: {}",
+                len(secrets), list(secrets.keys()),
+            )
+        return secrets
 
     async def research(
         self,
@@ -96,15 +117,16 @@ class DeepResearcher:
         t0 = time.monotonic()
         seen_urls: set[str] = set()
         failed_skills: list[tuple[str, str]] = []  # (skill_name, task_str)
+        phase_timings: dict[str, float] = {}
 
-        # ── Phase 0: Exa + SixtyFour in parallel ──────────────────────
+        # ── Phase 0: Exa FIRST (fast), SixtyFour in background ──────
+        t_phase = time.monotonic()
         logger.info("deep_researcher: phase 0 — exa + sixtyfour for {}", person)
 
-        exa_urls, exa_snippets, sixtyfour_result, deep_search_task_id = (
-            await self._phase0(person, company, seen_urls)
-        )
+        # Run Exa queries immediately (these are fast, ~1s)
+        exa_urls, exa_snippets = await self._exa_pass(person, company, seen_urls)
 
-        # Yield Exa results
+        # Yield Exa results IMMEDIATELY so frontend gets data in ~1s
         if exa_urls:
             yield AgentResult(
                 agent_name="exa_deep",
@@ -114,71 +136,66 @@ class DeepResearcher:
                 duration_seconds=time.monotonic() - t0,
             )
 
-        # Yield SixtyFour enrich results
-        if sixtyfour_result and sixtyfour_result.success:
-            sf_snippets = []
-            sf_profiles = []
-            sf_urls = []
+        # Start SixtyFour in background (don't wait — it's slow/unreliable)
+        sixtyfour_result = None
+        deep_search_task_id = None
 
+        async def _sixtyfour_bg():
+            nonlocal sixtyfour_result, deep_search_task_id
+            try:
+                sf_result, ds_id = await asyncio.gather(
+                    self._sixtyfour.enrich_lead(person, company),
+                    self._sixtyfour.start_deep_search(person),
+                    return_exceptions=True,
+                )
+                if not isinstance(sf_result, Exception):
+                    sixtyfour_result = sf_result
+                if not isinstance(ds_id, Exception):
+                    deep_search_task_id = ds_id
+            except Exception as exc:
+                logger.warning("sixtyfour background failed: {}", exc)
+
+        sf_task = asyncio.create_task(_sixtyfour_bg())
+
+        phase_timings["phase_0"] = round(time.monotonic() - t_phase, 2)
+        logger.info(
+            "deep_researcher: phase 0 fast pass done — {} exa URLs in {:.2f}s (sixtyfour running in bg)",
+            len(exa_urls),
+            phase_timings["phase_0"],
+        )
+
+        # ── Phase 1: Platform + OSINT skills in parallel ──────────────
+        t_phase = time.monotonic()
+        logger.info("deep_researcher: phase 1 — skills for {}", person)
+
+        async for result in self._phase1(
+            person, company, exa_urls, sixtyfour_result, seen_urls, failed_skills
+        ):
+            yield result
+
+        phase_timings["phase_1"] = round(time.monotonic() - t_phase, 2)
+        logger.info("deep_researcher: phase 1 done in {:.2f}s", phase_timings["phase_1"])
+
+        # Check if SixtyFour finished by now (it ran in background during phase 1)
+        try:
+            await asyncio.wait_for(sf_task, timeout=2.0)
+        except (asyncio.TimeoutError, Exception):
+            pass  # Don't block — move on
+
+        if sixtyfour_result and getattr(sixtyfour_result, "success", False):
+            sf_snippets, sf_urls, sf_profiles = [], [], []
             if sixtyfour_result.findings:
-                sf_snippets.extend(
-                    f"[SixtyFour] {f}" for f in sixtyfour_result.findings
-                )
-            if sixtyfour_result.linkedin:
-                sf_urls.append(sixtyfour_result.linkedin)
-                sf_profiles.append(
-                    SocialProfile(
-                        platform="linkedin",
-                        url=sixtyfour_result.linkedin,
-                        display_name=sixtyfour_result.name or person,
-                    )
-                )
-            if sixtyfour_result.twitter:
-                sf_urls.append(sixtyfour_result.twitter)
-                sf_profiles.append(
-                    SocialProfile(
-                        platform="twitter",
-                        url=sixtyfour_result.twitter,
-                        display_name=sixtyfour_result.name or person,
-                    )
-                )
-            if sixtyfour_result.github:
-                sf_urls.append(sixtyfour_result.github)
-                sf_profiles.append(
-                    SocialProfile(
-                        platform="github",
-                        url=sixtyfour_result.github,
-                        display_name=sixtyfour_result.name or person,
-                    )
-                )
-            if sixtyfour_result.instagram:
-                sf_urls.append(sixtyfour_result.instagram)
-                sf_profiles.append(
-                    SocialProfile(
-                        platform="instagram",
-                        url=sixtyfour_result.instagram,
-                        display_name=sixtyfour_result.name or person,
-                    )
-                )
-            if sixtyfour_result.email:
-                sf_snippets.append(
-                    f"[SixtyFour] Email: {sixtyfour_result.email}"
-                )
-            if sixtyfour_result.phone:
-                sf_snippets.append(
-                    f"[SixtyFour] Phone: {sixtyfour_result.phone}"
-                )
-            if sixtyfour_result.title:
-                sf_snippets.append(
-                    f"[SixtyFour] Title: {sixtyfour_result.title}"
-                )
-            if sixtyfour_result.company:
-                sf_snippets.append(
-                    f"[SixtyFour] Company: {sixtyfour_result.company}"
-                )
-
+                sf_snippets.extend(f"[SixtyFour] {f}" for f in sixtyfour_result.findings)
+            for attr, platform in [("linkedin", "linkedin"), ("twitter", "twitter"), ("github", "github"), ("instagram", "instagram")]:
+                url = getattr(sixtyfour_result, attr, None)
+                if url:
+                    sf_urls.append(url)
+                    sf_profiles.append(SocialProfile(platform=platform, url=url, display_name=sixtyfour_result.name or person))
+            for attr, label in [("email", "Email"), ("phone", "Phone"), ("title", "Title"), ("company", "Company")]:
+                val = getattr(sixtyfour_result, attr, None)
+                if val:
+                    sf_snippets.append(f"[SixtyFour] {label}: {val}")
             seen_urls.update(sf_urls)
-
             yield AgentResult(
                 agent_name="sixtyfour_enrich",
                 status=AgentStatus.SUCCESS,
@@ -188,21 +205,8 @@ class DeepResearcher:
                 duration_seconds=time.monotonic() - t0,
             )
 
-        logger.info(
-            "deep_researcher: phase 0 done — {} exa URLs, sixtyfour={}",
-            len(exa_urls),
-            sixtyfour_result.success if sixtyfour_result else "unconfigured",
-        )
-
-        # ── Phase 1: Platform + OSINT skills in parallel ──────────────
-        logger.info("deep_researcher: phase 1 — skills for {}", person)
-
-        async for result in self._phase1(
-            person, company, exa_urls, sixtyfour_result, seen_urls, failed_skills
-        ):
-            yield result
-
         # ── Phase 2: Deep URL extraction + SixtyFour deep search + dark web
+        t_phase = time.monotonic()
         logger.info("deep_researcher: phase 2 — deep extraction for {}", person)
 
         async for result in self._phase2(
@@ -210,21 +214,83 @@ class DeepResearcher:
         ):
             yield result
 
+        phase_timings["phase_2"] = round(time.monotonic() - t_phase, 2)
+        logger.info("deep_researcher: phase 2 done in {:.2f}s", phase_timings["phase_2"])
+
         # ── Phase 3: Verification loop — retry failed skills ──────────
         if failed_skills and self._accounts.configured:
+            t_phase = time.monotonic()
             logger.info(
                 "deep_researcher: phase 3 — retrying {} failed skills",
                 len(failed_skills),
             )
             async for result in self._phase3(person, failed_skills):
                 yield result
+            phase_timings["phase_3"] = round(time.monotonic() - t_phase, 2)
+            logger.info("deep_researcher: phase 3 done in {:.2f}s", phase_timings["phase_3"])
 
         elapsed = time.monotonic() - t0
         logger.info(
-            "deep_researcher: completed for {} in {:.1f}s", person, elapsed
+            "deep_researcher: completed for {} in {:.1f}s — timings={}",
+            person, elapsed, phase_timings,
+        )
+
+        # Yield a final meta-result with phase timings for eval/observability
+        import json as _json
+        yield AgentResult(
+            agent_name="deep_researcher_meta",
+            status=AgentStatus.SUCCESS,
+            snippets=[f"phase_timings:{_json.dumps(phase_timings)}"],
+            duration_seconds=elapsed,
+            confidence=1.0,
         )
 
     # ─── Phase 0: Exa + SixtyFour ────────────────────────────────────────
+
+    @traced("deep_researcher.exa_pass", tags=["phase:0"])
+    async def _exa_pass(
+        self,
+        person: str,
+        company: str | None,
+        seen_urls: set[str],
+    ) -> tuple[list[str], list[str]]:
+        """Run Exa queries only (fast, ~1s). Returns (urls, snippets)."""
+        exa_queries = [
+            EnrichmentRequest(name=person, company=company),
+            EnrichmentRequest(name=person, additional_context="social media profiles"),
+        ]
+        if company:
+            exa_queries.append(
+                EnrichmentRequest(name=person, additional_context=f"{company} employee")
+            )
+
+        results = await asyncio.gather(
+            *(self._exa.enrich_person(q) for q in exa_queries),
+            return_exceptions=True,
+        )
+
+        exa_urls: list[str] = []
+        exa_snippets: list[str] = []
+        for result in results:
+            if isinstance(result, Exception) or not result.success:
+                continue
+            for hit in result.hits:
+                if not hit.url or hit.url in seen_urls:
+                    continue
+                domain = urlparse(hit.url).netloc.lower()
+                if any(d in domain for d in SKIP_DOMAINS):
+                    continue
+                name_parts = person.lower().split()
+                title_lower = (hit.title or "").lower()
+                snippet_lower = (hit.snippet or "").lower()
+                if not any(part in title_lower or part in snippet_lower for part in name_parts):
+                    continue
+                seen_urls.add(hit.url)
+                exa_urls.append(hit.url)
+                snippet = f"[Exa] {hit.title}: {hit.snippet[:200]}" if hit.snippet else f"[Exa] {hit.title}"
+                exa_snippets.append(snippet)
+
+        return exa_urls, exa_snippets
 
     async def _phase0(
         self,
@@ -443,13 +509,26 @@ class DeepResearcher:
             except Exception as exc:
                 logger.warning("deep_researcher: skill error: {}", str(exc))
 
+    # Slow platforms that need more time (login flows, heavy JS, etc.)
+    _SLOW_SKILLS = frozenset({
+        "linkedin_company_posts", "youtube_filmography", "pinterest_pins",
+        "instagram_posts", "company_employees",
+    })
+
+    @traced("deep_researcher.run_skill", tags=["phase:1"])
     async def _run_skill_with_semaphore(
         self, skill_name: str, task_str: str
     ) -> dict | None:
-        """Run a skill task, respecting concurrency limit."""
+        """Run a skill task, respecting concurrency limit.
+
+        Passes saved platform credentials as secrets so Browser Use
+        can authenticate on login-walled platforms.
+        """
+        timeout = 120.0 if skill_name in self._SLOW_SKILLS else 60.0
         async with self._semaphore:
             return await self._cloud.run_skill(
-                skill_name, task_str, timeout=60.0
+                skill_name, task_str, timeout=timeout,
+                secrets=self._secrets if self._secrets else None,
             )
 
     # ─── Phase 2: Deep extraction + SixtyFour deep search + dark web ─────
@@ -501,15 +580,18 @@ class DeepResearcher:
             tasks.append(task)
             task_labels.append("hibp_check")
 
-        # Yield results as they complete
-        for idx, coro in enumerate(asyncio.as_completed(tasks)):
+        # Gather all results (preserves order, unlike as_completed)
+        all_results = await asyncio.gather(*tasks, return_exceptions=True)
+        for idx, result in enumerate(all_results):
             try:
-                result = await coro
+                if isinstance(result, Exception):
+                    logger.warning("deep_researcher: phase 2 task error: {}", result)
+                    continue
                 label = task_labels[idx] if idx < len(task_labels) else "phase2"
 
                 if label == "sixtyfour_deep_search":
-                    # Parse deep search results
-                    if result and result.success and result.rows:
+                    # Parse deep search results (DeepSearchResult dataclass)
+                    if result and getattr(result, "success", False) and getattr(result, "rows", []):
                         snippets = []
                         urls_found = []
                         for row in result.rows[:20]:
@@ -560,12 +642,22 @@ class DeepResearcher:
             except Exception as exc:
                 logger.warning("deep_researcher: phase 2 error: {}", str(exc))
 
+    @traced("deep_researcher.deep_extract", tags=["phase:2"])
     async def _deep_extract_with_semaphore(
         self, url: str, person: str
     ) -> dict | None:
         async with self._semaphore:
-            return await self._cloud.deep_extract_url(
-                url, person, timeout=60.0
+            # Pass secrets for deep extraction too (some URLs need auth)
+            task = (
+                f"Navigate to {url} and extract ALL information about "
+                f"'{person}'. Get: full name, title, bio, company, "
+                f"social links, achievements, education, publications, "
+                f"contact info, photos, and any other relevant data. "
+                f"Be thorough — extract everything visible on the page."
+            )
+            return await self._cloud.run_task(
+                task, max_steps=8, timeout=60.0,
+                secrets=self._secrets if self._secrets else None,
             )
 
     # ─── Phase 3: Verification loop + account creation ───────────────────

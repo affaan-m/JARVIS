@@ -62,9 +62,17 @@ class HumanDetector:
         img = Image.open(BytesIO(img_bytes))
         frame = np.array(img)
 
+        h, w = frame.shape[:2]
         crops = []
         for det in detections:
             x1, y1, x2, y2 = [int(v) for v in det["bbox"]]
+            # Add 30% padding around the bbox for better face detection
+            bw, bh = x2 - x1, y2 - y1
+            pad_x, pad_y = int(bw * 0.3), int(bh * 0.3)
+            x1 = max(0, x1 - pad_x)
+            y1 = max(0, y1 - pad_y)
+            x2 = min(w, x2 + pad_x)
+            y2 = min(h, y2 + pad_y)
             crop = frame[y1:y2, x1:x2]
             if crop.size == 0:
                 continue

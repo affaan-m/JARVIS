@@ -33,6 +33,10 @@ __pycache__/
 # Model weights
 *.pt
 
+# PimEyes session cookies (secret)
+pimeyes_cookies.json
+agent_credentials.json
+
 # Playwright MCP
 .playwright-mcp/
 

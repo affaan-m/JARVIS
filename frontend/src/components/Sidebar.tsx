@@ -10,6 +10,8 @@ interface SidebarProps {
   onSelect: (person: IntelPerson) => void;
   search: string;
   setSearch: (s: string) => void;
+  onSearchSubmit?: () => void;
+  isStreaming?: boolean;
 }
 
 const statusColor: Record<string, string> = {
@@ -18,7 +20,7 @@ const statusColor: Record<string, string> = {
   inactive: "#2a3a24",
 };
 
-export function Sidebar({ people, activePerson, onSelect, search, setSearch }: SidebarProps) {
+export function Sidebar({ people, activePerson, onSelect, search, setSearch, onSearchSubmit, isStreaming }: SidebarProps) {
   const filtered = people.filter(p => p.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
@@ -49,15 +51,19 @@ export function Sidebar({ people, activePerson, onSelect, search, setSearch }: S
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search targets..."
+              onKeyDown={e => { if (e.key === "Enter" && onSearchSubmit) onSearchSubmit(); }}
+              placeholder={isStreaming ? "Scanning..." : "Search or scan a name..."}
+              disabled={isStreaming}
               style={{
                 width: "100%", padding: "9px 12px 9px 32px",
-                background: "rgba(120,180,80,.04)", border: "1px solid rgba(120,180,80,.12)",
+                background: isStreaming ? "rgba(120,180,80,.08)" : "rgba(120,180,80,.04)",
+                border: `1px solid ${isStreaming ? "rgba(245,158,11,.3)" : "rgba(120,180,80,.12)"}`,
                 borderRadius: 8, color: "#e8f0d8", fontSize: 12,
                 outline: "none", fontFamily: "inherit", transition: "border-color .2s",
+                opacity: isStreaming ? 0.6 : 1,
               }}
-              onFocus={e => (e.target.style.borderColor = "rgba(120,180,80,.25)")}
-              onBlur={e => (e.target.style.borderColor = "rgba(120,180,80,.12)")}
+              onFocus={e => { if (!isStreaming) e.target.style.borderColor = "rgba(120,180,80,.25)"; }}
+              onBlur={e => (e.target.style.borderColor = isStreaming ? "rgba(245,158,11,.3)" : "rgba(120,180,80,.12)")}
             />
           </div>
         </div>

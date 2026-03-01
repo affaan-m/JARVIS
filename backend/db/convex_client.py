@@ -146,18 +146,26 @@ class ConvexGateway:
         *,
         urls: list[str] | None = None,
         confidence: float = 1.0,
+        data_type: str = "profile",
     ) -> str | None:
         """Push a single intel fragment to Convex for real-time frontend updates."""
         if not self.configured:
             return None
 
+        # Embed urls + confidence into the content JSON for frontend use
+        import json
+        content_payload = json.dumps({
+            "text": content,
+            "urls": urls or [],
+            "confidence": confidence,
+        })
+
         try:
-            result = await self._mutation("intelFragments:create", {
+            result = await self._mutation("intel:create", {
                 "personId": person_id,
                 "source": source,
-                "content": content,
-                "urls": urls or [],
-                "confidence": confidence,
+                "dataType": data_type,
+                "content": content_payload,
             })
             return result if isinstance(result, str) else None
         except Exception as exc:

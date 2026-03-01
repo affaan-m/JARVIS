@@ -41,7 +41,7 @@ class FaceDetectionResult(BaseModel):
 class FaceSearchRequest(BaseModel):
     """Input for reverse face search."""
 
-    embedding: list[float]
+    embedding: list[float] | None = None
     image_data: bytes | None = None
     search_engines: list[str] = Field(default_factory=lambda: ["pimeyes"])
 

@@ -57,8 +57,8 @@ class CapturePipeline:
         face_searcher: FaceSearchManager | None = None,
         exa_client: ExaEnrichmentClient | None = None,
         orchestrator: ResearchOrchestrator | None = None,
-        synthesis_engine: GeminiSynthesisEngine | None = None,
-        synthesis_fallback: AnthropicSynthesisEngine | None = None,
+        synthesis_engine: AnthropicSynthesisEngine | GeminiSynthesisEngine | None = None,
+        synthesis_fallback: GeminiSynthesisEngine | AnthropicSynthesisEngine | None = None,
         supermemory: SuperMemoryClient | None = None,
     ) -> None:
         self._detector = detector
@@ -515,6 +515,9 @@ class CapturePipeline:
 
         request = ResearchRequest(person_name=person_name)
         async for result in self._deep_researcher.research(request):
+            # Skip internal meta results (phase timings) — not for display/storage
+            if result.agent_name == "deep_researcher_meta":
+                continue
             # Push to Convex as intel fragment if we have a person_id and a Convex gateway
             if person_id and hasattr(self._db, "store_intel_fragment"):
                 content = " | ".join(result.snippets[:3]) if result.snippets else ""

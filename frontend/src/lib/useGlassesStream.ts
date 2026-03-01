@@ -12,6 +12,7 @@ interface UseGlassesStreamReturn {
   videoRef: React.RefObject<HTMLVideoElement | null>;
   status: StreamStatus;
   connect: (roomCode: string) => void;
+  connectWebcam: () => void;
   disconnect: () => void;
   error: string | null;
 }
@@ -46,6 +47,9 @@ export function useGlassesStream(): UseGlassesStreamReturn {
     wsRef.current = null;
     pcRef.current?.close();
     pcRef.current = null;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+    }
     streamRef.current = null;
     if (videoRef.current) {
       videoRef.current.srcObject = null;
@@ -53,6 +57,24 @@ export function useGlassesStream(): UseGlassesStreamReturn {
     setStatus("disconnected");
     setError(null);
   }, [clearConnectionTimeout]);
+
+  const connectWebcam = useCallback(() => {
+    disconnect();
+    setStatus("connecting");
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+      .then(stream => {
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+        setStatus("live");
+      })
+      .catch(err => {
+        console.error("[Webcam] Failed:", err);
+        setError(err instanceof Error ? err.message : "Webcam access denied");
+        setStatus("error");
+      });
+  }, [disconnect]);
 
   const connect = useCallback(
     (roomCode: string) => {
@@ -308,5 +330,5 @@ export function useGlassesStream(): UseGlassesStreamReturn {
     };
   }, [clearConnectionTimeout]);
 
-  return { videoRef, status, connect, disconnect, error };
+  return { videoRef, status, connect, connectWebcam, disconnect, error };
 }

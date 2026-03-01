@@ -48,6 +48,7 @@ class FrameSubmission(BaseModel):
     frame: str  # base64-encoded JPEG
     timestamp: int  # client-side ms since epoch
     source: str = "glasses_stream"
+    target: bool = False  # True = user explicitly targeting someone for identification
 
 
 class Detection(BaseModel):

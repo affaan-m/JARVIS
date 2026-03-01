@@ -12,6 +12,7 @@ interface CameraFeedProps {
   videoRef: React.RefObject<HTMLVideoElement | null>;
   status: StreamStatus;
   onConnect: (roomCode: string) => void;
+  onWebcam?: () => void;
   onDisconnect: () => void;
   error: string | null;
   detectionCount?: number;
@@ -67,7 +68,7 @@ function RoomCodeInput({ onSubmit }: { onSubmit: (code: string) => void }) {
   );
 }
 
-export function CameraFeed({ videoRef, status, onConnect, onDisconnect, error, detectionCount }: CameraFeedProps) {
+export function CameraFeed({ videoRef, status, onConnect, onWebcam, onDisconnect, error, detectionCount }: CameraFeedProps) {
   const isLive = status === "live";
   const isConnecting = status === "connecting";
   const isError = status === "error";
@@ -117,8 +118,24 @@ export function CameraFeed({ videoRef, status, onConnect, onDisconnect, error, d
               <line x1="2" y1="2" x2="22" y2="22" stroke="#4a4030" />
             </svg>
           </div>
-          {/* Room code input */}
+          {/* Room code input + webcam fallback */}
           <RoomCodeInput onSubmit={onConnect} />
+          {onWebcam && (
+            <button
+              onClick={onWebcam}
+              style={{
+                position: "absolute", top: 8, right: 8,
+                padding: "4px 10px", borderRadius: 3,
+                background: "rgba(74,124,63,.3)",
+                border: "1px solid rgba(120,180,80,.25)",
+                color: "rgba(120,180,80,.7)",
+                fontSize: 10, fontFamily: "monospace", letterSpacing: ".1em",
+                cursor: "pointer",
+              }}
+            >
+              WEBCAM
+            </button>
+          )}
         </>
       )}
 
