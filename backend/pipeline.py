@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import io
 from dataclasses import dataclass, field
 from uuid import uuid4
 
 from loguru import logger
+from PIL import Image
+
+from typing import Any
 
 from agents.models import OrchestratorResult, ResearchRequest
 from agents.orchestrator import ResearchOrchestrator
@@ -14,8 +18,9 @@ from enrichment.exa_client import ExaEnrichmentClient
 from enrichment.models import EnrichmentRequest, EnrichmentResult
 from identification import FaceDetector
 from identification.embedder import ArcFaceEmbedder
-from identification.models import FaceDetectionRequest, FaceSearchRequest
+from identification.models import BoundingBox, FaceDetectionRequest, FaceSearchRequest
 from identification.search_manager import FaceSearchManager
+from memory.supermemory_client import SuperMemoryClient
 from observability.laminar import traced
 from synthesis.connections import detect_connections
 from synthesis.anthropic_engine import AnthropicSynthesisEngine
@@ -52,6 +57,7 @@ class CapturePipeline:
         orchestrator: ResearchOrchestrator | None = None,
         synthesis_engine: GeminiSynthesisEngine | None = None,
         synthesis_fallback: AnthropicSynthesisEngine | None = None,
+        supermemory: SuperMemoryClient | None = None,
     ) -> None:
         self._detector = detector
         self._embedder = embedder
@@ -61,6 +67,7 @@ class CapturePipeline:
         self._orchestrator = orchestrator
         self._synthesis = synthesis_engine
         self._synthesis_fallback = synthesis_fallback
+        self._supermemory = supermemory
 
     @traced("pipeline.process")
     async def process(
@@ -127,6 +134,14 @@ class CapturePipeline:
             for face in detection_result.faces:
                 total_faces += 1
 
+                # Crop face from frame for downstream use (search, thumbnails)
+                cropped_bytes = self._crop_face(
+                    frame_bytes, face.bbox,
+                    detection_result.frame_width,
+                    detection_result.frame_height,
+                )
+                face_image = cropped_bytes or frame_bytes
+
                 # Generate embedding
                 embedding = self._embedder.embed(face, frame_bytes)
 
@@ -134,7 +149,7 @@ class CapturePipeline:
                 resolved_name = person_name  # Use provided name as default
                 if not resolved_name and self._face_searcher:
                     resolved_name = await self._identify_face(
-                        embedding, frame_bytes,
+                        embedding, face_image,
                     )
 
                 # Create person record
@@ -155,7 +170,7 @@ class CapturePipeline:
                 persons_created.append(person_id)
 
                 if resolved_name:
-                    person_identities[person_id] = (resolved_name, frame_bytes)
+                    person_identities[person_id] = (resolved_name, face_image)
 
                 logger.info(
                     "Created person={} name={} from capture={} frame={} confidence={:.2f}",
@@ -202,6 +217,45 @@ class CapturePipeline:
             success=True,
         )
 
+    @staticmethod
+    def _crop_face(
+        frame_bytes: bytes,
+        bbox: BoundingBox,
+        frame_width: int,
+        frame_height: int,
+    ) -> bytes | None:
+        """Crop a face region from the frame using normalized bbox coords.
+
+        Returns JPEG bytes of the cropped face, or None if cropping fails.
+        """
+        if frame_width <= 0 or frame_height <= 0:
+            return None
+        try:
+            img = Image.open(io.BytesIO(frame_bytes))
+            w, h = img.size
+
+            left = int(bbox.x * w)
+            upper = int(bbox.y * h)
+            right = int((bbox.x + bbox.width) * w)
+            lower = int((bbox.y + bbox.height) * h)
+
+            # Clamp to image bounds
+            left = max(0, left)
+            upper = max(0, upper)
+            right = min(w, right)
+            lower = min(h, lower)
+
+            if right <= left or lower <= upper:
+                return None
+
+            cropped = img.crop((left, upper, right, lower))
+            buf = io.BytesIO()
+            cropped.save(buf, format="JPEG", quality=90)
+            return buf.getvalue()
+        except Exception as exc:
+            logger.warning("Face crop failed: {}", exc)
+            return None
+
     @traced("pipeline.identify_face")
     async def _identify_face(
         self, embedding: list[float], image_data: bytes
@@ -243,6 +297,23 @@ class CapturePipeline:
         Returns True if synthesis produced a dossier, False otherwise.
         All failures are logged but never raised — caller uses return_exceptions anyway.
         """
+        # Check SuperMemory cache before running expensive enrichment
+        cached_dossier = await self._check_supermemory_cache(person_name)
+        if cached_dossier is not None:
+            logger.info(
+                "SuperMemory cache hit for person={} name={}, skipping enrichment",
+                person_id, person_name,
+            )
+            await self._db.update_person(person_id, {
+                "status": "enriched",
+                "summary": cached_dossier.get("summary", ""),
+                "occupation": cached_dossier.get("occupation", ""),
+                "organization": cached_dossier.get("organization", ""),
+                "dossier": cached_dossier,
+                "source": "supermemory_cache",
+            })
+            return True
+
         await self._db.update_person(person_id, {"status": "enriching"})
 
         # Fan out Exa + browser research in parallel
@@ -265,7 +336,7 @@ class CapturePipeline:
             person_name, exa_result, browser_result,
         )
 
-        # Synthesize with Gemini, fall back to Anthropic on 429 rate-limit
+        # Synthesize with primary engine, fall back to secondary on any failure
         if not self._synthesis:
             logger.warning("No synthesis engine configured, skipping for {}", person_id)
             await self._db.update_person(person_id, {"status": "enriched_no_synthesis"})
@@ -273,17 +344,15 @@ class CapturePipeline:
 
         synthesis_result = await self._synthesis.synthesize(synthesis_request)
 
-        # If Gemini hit rate-limit (429) and we have an Anthropic fallback, retry
+        # If primary failed and we have a fallback engine, retry with it
         if (
             not synthesis_result.success
-            and synthesis_result.error
-            and "429" in synthesis_result.error
             and self._synthesis_fallback
             and self._synthesis_fallback.configured
         ):
             logger.warning(
-                "Gemini 429 for person={}, retrying with Anthropic fallback",
-                person_id,
+                "Primary synthesis failed for person={} ({}), retrying with fallback engine",
+                person_id, synthesis_result.error,
             )
             synthesis_result = await self._synthesis_fallback.synthesize(
                 synthesis_request,
@@ -306,10 +375,15 @@ class CapturePipeline:
             "occupation": synthesis_result.occupation,
             "organization": synthesis_result.organization,
         }
+        dossier_dict: dict[str, Any] | None = None
         if synthesis_result.dossier:
-            update_data["dossier"] = synthesis_result.dossier.model_dump()
+            dossier_dict = synthesis_result.dossier.model_dump()
+            update_data["dossier"] = dossier_dict
 
         await self._db.update_person(person_id, update_data)
+
+        # Cache successful dossier in SuperMemory for future lookups
+        await self._store_supermemory_cache(person_name, update_data, dossier_dict)
 
         # Detect connections against all existing persons
         if synthesis_result.dossier:
@@ -320,6 +394,37 @@ class CapturePipeline:
             person_id, person_name,
         )
         return True
+
+    async def _check_supermemory_cache(self, person_name: str) -> dict[str, Any] | None:
+        """Check SuperMemory for a cached dossier. Returns None on miss or error."""
+        if not self._supermemory:
+            return None
+        try:
+            return await self._supermemory.search_person(person_name)
+        except Exception as exc:
+            logger.error("SuperMemory cache check failed for {}: {}", person_name, exc)
+            return None
+
+    async def _store_supermemory_cache(
+        self,
+        person_name: str,
+        update_data: dict[str, Any],
+        dossier_dict: dict[str, Any] | None,
+    ) -> None:
+        """Store a completed dossier in SuperMemory for future cache hits."""
+        if not self._supermemory:
+            return
+        cache_payload = {
+            "summary": update_data.get("summary", ""),
+            "occupation": update_data.get("occupation", ""),
+            "organization": update_data.get("organization", ""),
+        }
+        if dossier_dict:
+            cache_payload["dossier"] = dossier_dict
+        try:
+            await self._supermemory.store_dossier(person_name, cache_payload)
+        except Exception as exc:
+            logger.error("SuperMemory cache store failed for {}: {}", person_name, exc)
 
     async def _detect_and_store_connections(
         self, person_id: str, dossier: DossierReport,

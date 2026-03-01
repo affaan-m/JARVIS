@@ -39,3 +39,18 @@ class TaskPhase(BaseModel):
     title: str
     timebox: str
     tasks: list[TaskItem] = Field(default_factory=list)
+
+
+class IdentifyRequest(BaseModel):
+    name: str = Field(..., min_length=1, description="Person's full name")
+    image_url: str = Field(..., min_length=1, description="URL of a photo of the person")
+
+
+class IdentifyResponse(BaseModel):
+    capture_id: str
+    total_frames: int = 0
+    faces_detected: int = 0
+    persons_created: list[str] = Field(default_factory=list)
+    persons_enriched: int = 0
+    success: bool = True
+    error: str | None = None

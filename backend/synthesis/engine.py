@@ -126,7 +126,7 @@ class GeminiSynthesisEngine:
             WorkHistoryEntry(
                 role=entry.get("role", ""),
                 company=entry.get("company", ""),
-                period=entry.get("period"),
+                period=entry.get("period") or None,
             )
             for entry in data.get("work_history", [])
             if entry.get("role") or entry.get("company")
@@ -135,7 +135,7 @@ class GeminiSynthesisEngine:
         education = [
             EducationEntry(
                 school=entry.get("school", ""),
-                degree=entry.get("degree"),
+                degree=entry.get("degree") or None,
             )
             for entry in data.get("education", [])
             if entry.get("school")

@@ -3,7 +3,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, UploadFile
+from uuid import uuid4
+
+import httpx
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
@@ -19,8 +22,9 @@ from db.memory_gateway import InMemoryDatabaseGateway
 from enrichment.exa_client import ExaEnrichmentClient
 from identification.detector import MediaPipeFaceDetector
 from identification.embedder import ArcFaceEmbedder
+from memory.supermemory_client import SuperMemoryClient
 from pipeline import CapturePipeline
-from schemas import HealthResponse, ServiceStatus, TaskPhase
+from schemas import HealthResponse, IdentifyRequest, IdentifyResponse, ServiceStatus, TaskPhase
 from synthesis.anthropic_engine import AnthropicSynthesisEngine
 from synthesis.engine import GeminiSynthesisEngine
 from tasks import TASK_PHASES
@@ -41,8 +45,11 @@ db_gateway = convex_gw if convex_gw.configured else InMemoryDatabaseGateway()
 # Enrichment + research + synthesis (None when API keys missing)
 exa_client = ExaEnrichmentClient(settings) if settings.exa_api_key else None
 orchestrator = ResearchOrchestrator(settings) if settings.browser_use_api_key else None
-synthesis_engine = GeminiSynthesisEngine(settings) if settings.gemini_api_key else None
-synthesis_fallback = AnthropicSynthesisEngine(settings) if settings.anthropic_api_key else None
+synthesis_engine = AnthropicSynthesisEngine(settings) if settings.anthropic_api_key else None
+synthesis_fallback = GeminiSynthesisEngine(settings) if settings.gemini_api_key else None
+
+# SuperMemory for person dossier caching (None when API key missing)
+supermemory_client = SuperMemoryClient(settings.supermemory_api_key) if settings.supermemory_api_key else None
 
 pipeline = CapturePipeline(
     detector=detector,
@@ -52,6 +59,7 @@ pipeline = CapturePipeline(
     orchestrator=orchestrator,
     synthesis_engine=synthesis_engine,
     synthesis_fallback=synthesis_fallback,
+    supermemory=supermemory_client,
 )
 
 capture_service = CaptureService(pipeline=pipeline)
@@ -69,20 +77,23 @@ telegram_bot: TelegramCaptureBot | None = create_telegram_bot(
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info(
-        "SPECTER started — det={} emb={} db={} exa={} orch={} synth={} synth_fallback={}",
+        "SPECTER started — det={} emb={} db={} exa={} orch={} synth={} (primary) synth_fallback={} supermemory={}",
         detector.__class__.__name__,
         embedder.__class__.__name__,
         db_gateway.__class__.__name__,
         exa_client is not None,
         orchestrator is not None,
-        synthesis_engine is not None,
-        synthesis_fallback is not None,
+        synthesis_engine.__class__.__name__ if synthesis_engine else None,
+        synthesis_fallback.__class__.__name__ if synthesis_fallback else None,
+        supermemory_client is not None,
     )
     if telegram_bot:
         await telegram_bot.start()
     yield
     if telegram_bot:
         await telegram_bot.stop()
+    if supermemory_client:
+        await supermemory_client.close()
     logger.info("SPECTER shutting down")
 
 
@@ -121,8 +132,8 @@ async def services() -> list[ServiceStatus]:
         "exa": "Fast pass research and person lookup",
         "browser_use": "Deep research browser agents",
         "openai": "Transcription and fallback LLM integrations",
-        "gemini": "Primary vision and synthesis model",
-        "anthropic": "Fallback synthesis model (Claude) when Gemini rate-limited",
+        "anthropic": "Primary synthesis model (Claude)",
+        "gemini": "Fallback vision and synthesis model when Anthropic unavailable",
         "laminar": "Tracing and evaluation telemetry",
         "telegram": "Glasses-side media intake",
         "pimeyes_pool": "Rotating account pool for identification",
@@ -148,3 +159,54 @@ async def capture(
     return await capture_service.enqueue_upload(
         file=file, source=source, person_name=person_name,
     )
+
+
+@app.post("/api/capture/identify", response_model=IdentifyResponse)
+async def identify(body: IdentifyRequest) -> IdentifyResponse:
+    """Identify a person by name + image URL. Downloads the image, runs the full pipeline."""
+    capture_id = f"identify_{uuid4().hex[:12]}"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.get(body.image_url)
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to download image: HTTP {exc.response.status_code}",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to download image: {exc}",
+            ) from exc
+
+    content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
+    image_data = resp.content
+
+    result = await pipeline.process(
+        capture_id=capture_id,
+        data=image_data,
+        content_type=content_type,
+        source="api_identify",
+        person_name=body.name,
+    )
+
+    return IdentifyResponse(
+        capture_id=result.capture_id,
+        total_frames=result.total_frames,
+        faces_detected=result.faces_detected,
+        persons_created=list(result.persons_created),
+        persons_enriched=result.persons_enriched,
+        success=result.success,
+        error=result.error,
+    )
+
+
+@app.get("/api/person/{person_id}")
+async def get_person(person_id: str):
+    """Retrieve stored person data + dossier by ID."""
+    person = await db_gateway.get_person(person_id)
+    if person is None:
+        raise HTTPException(status_code=404, detail=f"Person {person_id} not found")
+    return person

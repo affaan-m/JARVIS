@@ -26,6 +26,7 @@ dependencies = [
   "twscrape>=0.17.0",
   "uvicorn>=0.35.0",
   "python-telegram-bot>=22.6",
+  "hud-python>=0.5.29",
 ]
 
 [project.optional-dependencies]
@@ -38,7 +39,7 @@ dev = [
 
 [tool.setuptools]
 py-modules = ["config", "env_check", "main", "pipeline", "schemas", "tasks"]
-packages = ["agents", "capture", "db", "enrichment", "identification", "observability", "synthesis"]
+packages = ["agents", "capture", "db", "enrichment", "eval", "identification", "observability", "synthesis"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
