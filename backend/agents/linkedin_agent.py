@@ -75,11 +75,11 @@ class LinkedInAgent(BaseBrowserAgent):
             )
 
         except ImportError:
-            logger.warning("browser-use or langchain-openai not available, returning empty result")
+            logger.warning("browser-use not available, returning empty result")
             return AgentResult(
                 agent_name=self.agent_name,
                 status=AgentStatus.FAILED,
-                error="browser-use or langchain-openai not installed",
+                error="browser-use not installed",
             )
 
         except Exception as exc:

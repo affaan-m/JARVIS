@@ -35,14 +35,6 @@ class SocialAgent(BaseBrowserAgent):
         logger.info("social agent searching: {}", query)
 
         try:
-            from browser_use import Agent
-            from langchain_openai import ChatOpenAI
-
-            llm = ChatOpenAI(
-                model="gpt-4o-mini",
-                api_key=self._settings.openai_api_key,
-            )
-
             task = (
                 f"Search for '{query}' across these platforms and extract profile info:\n"
                 f"1. GitHub (github.com) — username, repos, bio, contributions\n"
@@ -57,7 +49,7 @@ class SocialAgent(BaseBrowserAgent):
                 f"'site:reddit.com {query}', etc."
             )
 
-            agent = Agent(task=task, llm=llm)
+            agent = self._create_browser_agent(task)
             result = await agent.run()
             final_result = result.final_result() if result else None
 
@@ -104,11 +96,11 @@ class SocialAgent(BaseBrowserAgent):
             )
 
         except ImportError:
-            logger.warning("browser-use or langchain-openai not available for social agent")
+            logger.warning("browser-use not available for social agent")
             return AgentResult(
                 agent_name=self.agent_name,
                 status=AgentStatus.FAILED,
-                error="browser-use or langchain-openai not installed",
+                error="browser-use not installed",
             )
 
         except Exception as exc:

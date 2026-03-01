@@ -152,11 +152,11 @@ class TwitterAgent(BaseBrowserAgent):
             )
 
         except ImportError:
-            logger.warning("browser-use or langchain-openai not available for twitter fallback")
+            logger.warning("browser-use not available for twitter fallback")
             return AgentResult(
                 agent_name=self.agent_name,
                 status=AgentStatus.FAILED,
-                error="browser-use or langchain-openai not installed",
+                error="browser-use not installed",
             )
 
         except Exception as exc:
