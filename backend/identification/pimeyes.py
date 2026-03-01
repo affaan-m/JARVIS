@@ -196,23 +196,28 @@ class PimEyesSearcher:
     async def _fetch_results(
         self, api_url: str, search_hash: str, limit: int = 50
     ) -> list[dict]:
-        """Fetch paginated results from PimEyes' external results server."""
+        """Fetch paginated results from PimEyes' external results server.
+
+        PimEyes processes searches asynchronously — the first poll may
+        return 0 results if the backend hasn't finished.  We retry up to
+        5 times with exponential backoff before giving up.
+        """
         all_results: list[dict] = []
-        offset = 0
-        page_size = 50
+        max_retries = 5
 
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(20.0), follow_redirects=True
         ) as client:
-            while len(all_results) < limit:
-                batch_size = min(page_size, limit - len(all_results))
+            # Retry loop: wait for results to become available
+            for attempt in range(max_retries):
+                if attempt > 0:
+                    wait = 1.0 * (1.5 ** (attempt - 1))  # 1s, 1.5s, 2.25s, 3.4s
+                    logger.info("PimEyes: results not ready, retry {} in {:.1f}s", attempt, wait)
+                    await asyncio.sleep(wait)
+
                 resp = await client.post(
                     api_url,
-                    json={
-                        "hash": search_hash,
-                        "offset": offset,
-                        "limit": batch_size,
-                    },
+                    json={"hash": search_hash, "offset": 0, "limit": limit},
                     headers={"Content-Type": "application/json"},
                 )
                 if resp.status_code != 200:
@@ -220,17 +225,30 @@ class PimEyesSearcher:
                         "PimEyes results fetch returned {}: {}",
                         resp.status_code, resp.text[:200],
                     )
-                    break
+                    continue
 
                 data = resp.json()
                 results = data.get("results", [])
-                all_results.extend(results)
-
-                if not data.get("isMoreResults", False) or not results:
-                    break
-
-                offset += len(results)
-                await asyncio.sleep(0.2)
+                if results:
+                    all_results.extend(results)
+                    # Fetch additional pages if available
+                    offset = len(results)
+                    while data.get("isMoreResults", False) and len(all_results) < limit:
+                        await asyncio.sleep(0.2)
+                        page_resp = await client.post(
+                            api_url,
+                            json={"hash": search_hash, "offset": offset, "limit": 50},
+                            headers={"Content-Type": "application/json"},
+                        )
+                        if page_resp.status_code != 200:
+                            break
+                        data = page_resp.json()
+                        page_results = data.get("results", [])
+                        if not page_results:
+                            break
+                        all_results.extend(page_results)
+                        offset += len(page_results)
+                    break  # Got results, stop retrying
 
         return all_results
 

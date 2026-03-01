@@ -28,6 +28,11 @@ function agentToSource(agentName: string): { nm: string; tp: string } {
     skill_whois_lookup: { nm: "WHOIS Lookup", tp: "OSINT" },
     deep_extract: { nm: "Deep Extract", tp: "WEB" },
     hibp_breach: { nm: "Data Breaches", tp: "DARK WEB" },
+    wow_court_records: { nm: "Court Records", tp: "PUBLIC RECORD" },
+    wow_political_donations: { nm: "Political Donations", tp: "PUBLIC RECORD" },
+    wow_academic_papers: { nm: "Academic Papers", tp: "ACADEMIC" },
+    wow_podcast_appearances: { nm: "Podcast Appearances", tp: "MEDIA" },
+    wow_crunchbase_profile: { nm: "Crunchbase Profile", tp: "CORPORATE" },
   };
   if (map[agentName]) return map[agentName];
   // Strip "skill_" prefix for unknown skills

@@ -580,6 +580,50 @@ class DeepResearcher:
             tasks.append(task)
             task_labels.append("hibp_check")
 
+        # High-impact freeform tasks (public records that wow judges)
+        wow_tasks = [
+            (
+                "court_records",
+                f"Go to courtlistener.com/? and search for '{person}'. "
+                f"Extract any court cases, lawsuits, or legal filings. "
+                f"Also try unicourt.com. Report all findings.",
+            ),
+            (
+                "political_donations",
+                f"Go to fec.gov/data/receipts/individual-contributions/ "
+                f"and search for '{person}'. Extract all political donations — "
+                f"amounts, recipients, dates, employer. Be thorough.",
+            ),
+            (
+                "academic_papers",
+                f"Go to scholar.google.com and search for '{person}'. "
+                f"Extract all academic papers, citations, h-index, co-authors, "
+                f"and research areas. Also check semanticscholar.org.",
+            ),
+            (
+                "podcast_appearances",
+                f"Go to listennotes.com and search for '{person}'. "
+                f"Find any podcast episodes they appeared on or hosted. "
+                f"Extract episode titles, show names, and dates.",
+            ),
+            (
+                "crunchbase_profile",
+                f"Go to crunchbase.com and search for '{person}'. "
+                f"Extract: roles, companies founded/worked at, funding rounds, "
+                f"investors, board positions, and exits.",
+            ),
+        ]
+        for label, task_str in wow_tasks:
+            async def _run_wow(lbl: str, prompt: str) -> dict | None:
+                async with self._semaphore:
+                    return await self._cloud.run_task(
+                        prompt, max_steps=8, timeout=60.0,
+                        secrets=self._secrets if self._secrets else None,
+                    )
+            task = asyncio.ensure_future(_run_wow(label, task_str))
+            tasks.append(task)
+            task_labels.append(f"wow:{label}")
+
         # Gather all results (preserves order, unlike as_completed)
         all_results = await asyncio.gather(*tasks, return_exceptions=True)
         for idx, result in enumerate(all_results):
@@ -619,6 +663,17 @@ class DeepResearcher:
                             snippets=[output[:500]] if output else [],
                             confidence=0.9,
                         )
+
+                elif label.startswith("wow:") and isinstance(result, dict) and result.get("success"):
+                    # High-impact freeform task — use specific wow label as agent_name
+                    output = result.get("output", "")
+                    wow_name = label.replace("wow:", "")
+                    yield AgentResult(
+                        agent_name=f"wow_{wow_name}",
+                        status=AgentStatus.SUCCESS,
+                        snippets=[output[:500]] if output else [],
+                        confidence=self._compute_confidence(output, person),
+                    )
 
                 elif isinstance(result, dict) and result.get("success"):
                     output = result.get("output", "")
