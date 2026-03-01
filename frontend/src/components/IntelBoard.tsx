@@ -441,29 +441,35 @@ export default function IntelBoard() {
           {/* BOARD SURFACE */}
           <div style={{
             position: "absolute", top: FR, left: FR, right: FR, bottom: FR, zIndex: 4,
-            background: "linear-gradient(155deg,#0d1321 0%,#0a0f1a 35%,#0f1629 70%,#111827 100%)", borderRadius: 2,
+            backgroundColor: "#0c1120",
+            backgroundImage: [
+              "linear-gradient(rgba(18,32,65,.06) 1px, transparent 1px)",
+              "linear-gradient(90deg, rgba(18,32,65,.06) 1px, transparent 1px)",
+              "radial-gradient(circle, rgba(5,9,20,.78) 1.2px, transparent 1.2px)",
+              "radial-gradient(circle, rgba(5,9,20,.78) 1.2px, transparent 1.2px)",
+            ].join(", "),
+            backgroundSize: "28px 28px, 28px 28px, 7px 7px, 7px 7px",
+            backgroundPosition: "0 0, 0 0, 3.5px 3.5px, 0 0",
+            borderRadius: 2,
           }}>
-            <div style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: 2, pointerEvents: "none", zIndex: 1 }}>
-              <div style={{
-                position: "absolute", width: "100%", height: "200%", opacity: .025,
-                background: "repeating-linear-gradient(0deg,transparent 0px,transparent 3px,rgba(148,163,184,.4) 3px,rgba(148,163,184,.4) 4px)",
-                animation: "sm 12s linear infinite",
-              }} />
-            </div>
+            {/* Cork grain overlay */}
             <div style={{
-              position: "absolute", inset: 0, pointerEvents: "none", opacity: .02, borderRadius: 2,
-              backgroundImage: "radial-gradient(circle,#475569 1px,transparent 1px)", backgroundSize: "26px 26px",
+              position: "absolute", inset: 0, borderRadius: 2, pointerEvents: "none", zIndex: 1, opacity: .42,
+              mixBlendMode: "overlay",
+              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='c'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.38' numOctaves='3' seed='7' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23c)'/%3E%3C/svg%3E")`,
+              backgroundSize: "220px 220px",
             }} />
+            {/* Vignette */}
             <div style={{
               position: "absolute", inset: 0, pointerEvents: "none", zIndex: 2, borderRadius: 2,
-              background: "radial-gradient(ellipse at center,transparent 45%,rgba(3,6,16,.55) 100%)",
+              background: "radial-gradient(ellipse at center,transparent 40%,rgba(2,5,14,.65) 100%)",
             }} />
             {Array.from({ length: 10 }).map((_, i) => (
               <div key={i} style={{
                 position: "absolute", left: `${10 + Math.random() * 80}%`, bottom: `${Math.random() * 15}%`,
                 width: 1.5, height: 1.5, borderRadius: "50%", background: "rgba(148,163,184,.2)",
                 animation: `pf ${8 + Math.random() * 8}s linear infinite`, animationDelay: `${Math.random() * 8}s`,
-                pointerEvents: "none", zIndex: 2,
+                pointerEvents: "none", zIndex: 3,
               }} />
             ))}
           </div>
@@ -594,76 +600,69 @@ export default function IntelBoard() {
         )}
       </div>
 
-      {/* GLASSMORPHISM MODAL */}
+      {/* INTELLIGENCE MODAL */}
       {modalVis && selDoc && (
         <div onClick={backFromDoc} style={{
           position: "fixed", inset: 0, zIndex: 100,
-          background: "rgba(3,6,16,.5)", backdropFilter: "blur(10px)",
+          background: "rgba(0,0,0,.65)", backdropFilter: "blur(6px)",
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
           <div onClick={e => e.stopPropagation()} style={{
-            width: 540, maxHeight: "80vh", overflowY: "auto",
-            background: selDoc.kind === "summary"
-              ? "linear-gradient(140deg,rgba(15,25,50,.92),rgba(30,58,95,.8))"
-              : "linear-gradient(140deg,rgba(10,30,22,.92),rgba(18,48,32,.8))",
-            backdropFilter: "blur(40px)",
-            border: `1px solid ${selDoc.kind === "summary" ? "rgba(96,165,250,.2)" : "rgba(52,211,153,.2)"}`,
-            borderRadius: 14, padding: "26px 30px 30px",
-            boxShadow: "0 30px 80px rgba(0,0,0,.5)", animation: "mi .35s ease-out",
+            position: "relative",
+            width: 520, maxHeight: "80vh", overflowY: "auto",
+            background: "#0e0e11",
+            border: "1px solid rgba(255,255,255,.08)",
+            borderRadius: 2, padding: "24px 28px 28px",
+            boxShadow: "0 24px 64px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.04)",
+            animation: "mi .3s ease-out",
           }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-              <div style={{
-                color: selDoc.kind === "summary" ? "#60a5fa" : "#34d399",
-                fontSize: 9, fontWeight: 700, letterSpacing: ".14em",
-                background: selDoc.kind === "summary" ? "rgba(96,165,250,.08)" : "rgba(52,211,153,.08)",
-                padding: "4px 10px", borderRadius: 3,
-                border: `1px solid ${selDoc.kind === "summary" ? "rgba(96,165,250,.18)" : "rgba(52,211,153,.18)"}`,
-              }}>
+            {/* Grain overlay */}
+            <div style={{
+              position: "absolute", inset: 0, borderRadius: 2, pointerEvents: "none", opacity: .04, zIndex: 0,
+              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+              backgroundSize: "200px 200px",
+            }} />
+
+            {/* Header row */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, position: "relative", zIndex: 1 }}>
+              <span style={{ color: "#52525b", fontSize: 9, fontWeight: 600, letterSpacing: ".18em", fontFamily: "monospace" }}>
                 {selDoc.kind === "summary" ? "INTELLIGENCE SUMMARY" : selDoc.tp}
-              </div>
+              </span>
               <button onClick={backFromDoc} style={{
-                background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", color: "#7a8a9a",
-                width: 28, height: 28, borderRadius: 6, cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12,
+                background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)",
+                borderRadius: 2, color: "#52525b",
+                width: 26, height: 26, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11,
               }}>✕</button>
             </div>
+
             {selDoc.kind === "summary" && activePerson ? (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
+              <div style={{ position: "relative", zIndex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
                   <div style={{
-                    width: 58, height: 58, borderRadius: "50%", flexShrink: 0,
-                    background: "linear-gradient(135deg,#1e3a5f,rgba(37,99,235,.2))",
-                    border: "2px solid #2d4a6f", display: "flex", alignItems: "center", justifyContent: "center",
+                    width: 48, height: 48, borderRadius: "50%", flexShrink: 0,
+                    background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
                   }}>
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-                      <circle cx="12" cy="8" r="4" fill="#64748b" />
-                      <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" fill="#64748b" />
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="8" r="4" fill="#52525b" />
+                      <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" fill="#52525b" />
                     </svg>
                   </div>
-                  <div>
-                    <div style={{ color: "#f1f5f9", fontSize: 20, fontWeight: 700 }}>{activePerson.summary.nm}</div>
-                    <div style={{ color: "#60a5fa", fontSize: 11.5, fontWeight: 600, marginTop: 2 }}>
-                      {srcs.length} SOURCE{srcs.length !== 1 ? "S" : ""} AGGREGATED
-                    </div>
+                  <div style={{ color: "#f4f4f5", fontSize: 18, fontWeight: 700, letterSpacing: ".04em" }}>
+                    {activePerson.summary.nm}
                   </div>
                 </div>
-                <div style={{ height: 1, background: "linear-gradient(90deg,transparent,rgba(96,165,250,.15),transparent)", marginBottom: 16 }} />
-                <div style={{ color: "#b8c8d8", fontSize: 13.5, lineHeight: 1.75 }}>{activePerson.summary.sm}</div>
-              </>
+                <div style={{ height: 1, background: "rgba(255,255,255,.07)", marginBottom: 16 }} />
+                <div style={{ color: "#a1a1aa", fontSize: 13, lineHeight: 1.75 }}>{activePerson.summary.sm}</div>
+              </div>
             ) : (
-              <>
-                <div style={{ color: "#f1f5f9", fontSize: 18, fontWeight: 700 }}>{selDoc.nm}</div>
-                <div style={{ height: 1, background: "linear-gradient(90deg,transparent,rgba(52,211,153,.15),transparent)", margin: "14px 0" }} />
-                <div style={{ color: "#b8c8d8", fontSize: 13.5, lineHeight: 1.75 }}>{selDoc.sn}</div>
-              </>
+              <div style={{ position: "relative", zIndex: 1 }}>
+                <div style={{ color: "#f4f4f5", fontSize: 16, fontWeight: 600, letterSpacing: ".02em", marginBottom: 14 }}>{selDoc.nm}</div>
+                <div style={{ height: 1, background: "rgba(255,255,255,.07)", marginBottom: 14 }} />
+                <div style={{ color: "#a1a1aa", fontSize: 13, lineHeight: 1.75 }}>{selDoc.sn}</div>
+              </div>
             )}
-            <div style={{
-              height: 1, background: `linear-gradient(90deg,transparent,${selDoc.kind === "summary" ? "rgba(96,165,250,.12)" : "rgba(52,211,153,.12)"},transparent)`,
-              marginTop: 24,
-            }} />
-            <div style={{ marginTop: 12, color: "#3a4a5a", fontSize: 9, letterSpacing: ".12em", textAlign: "center", fontWeight: 600 }}>
-              CLASSIFIED • EYES ONLY • {new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }).toUpperCase()}
-            </div>
           </div>
         </div>
       )}
