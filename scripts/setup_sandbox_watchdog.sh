@@ -12,7 +12,7 @@ echo "=== Setting up sandbox self-healing watchdog ==="
 
 # 1. Install /etc/profile.d/ hook (runs on every new login shell)
 echo "Installing $PROFILE_SCRIPT ..."
-cat > "$PROFILE_SCRIPT" << 'EOF'
+sudo tee "$PROFILE_SCRIPT" > /dev/null << 'EOF'
 #!/bin/bash
 # Auto-start the Specter watchdog on every shell login
 PID_FILE="/tmp/watchdog.pid"
@@ -22,7 +22,7 @@ else
   bash /home/daytona/app/scripts/start_watchdog.sh &
 fi
 EOF
-chmod +x "$PROFILE_SCRIPT"
+sudo chmod +x "$PROFILE_SCRIPT"
 echo "  -> done"
 
 # 2. Append .bashrc hook as backup (for non-login shells)
