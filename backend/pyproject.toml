@@ -13,6 +13,7 @@ dependencies = [
   "fastapi>=0.116.0",
   "httpx>=0.28.1",
   "google-genai>=1.60.0",
+  "lmnr>=0.7.40",
   "loguru>=0.7.3",
   "mediapipe>=0.10.32",
   "numpy>=2.4.2",

@@ -29,7 +29,7 @@ from identification.models import (
     FaceSearchRequest,
     FaceSearchResult,
 )
-from observability.laminar import LaminarTracingClient
+from observability.laminar import initialize_laminar, traced
 from synthesis.models import (
     ConnectionEdge,
     SocialProfile,
@@ -89,14 +89,6 @@ def exa_configured(configured_settings: Settings) -> ExaEnrichmentClient:
     return ExaEnrichmentClient(configured_settings)
 
 
-@pytest.fixture()
-def laminar_unconfigured(unconfigured_settings: Settings) -> LaminarTracingClient:
-    return LaminarTracingClient(unconfigured_settings)
-
-
-@pytest.fixture()
-def laminar_configured(configured_settings: Settings) -> LaminarTracingClient:
-    return LaminarTracingClient(configured_settings)
 
 
 # ── ConvexGateway Tests ──────────────────────────────────────────────────────
@@ -188,25 +180,41 @@ class TestExaEnrichmentClient:
         assert result.hits[0].source == "exa"
 
 
-# ── LaminarTracingClient Tests ──────────────────────────────────────────────
+# ── Laminar Observability Tests ─────────────────────────────────────────────
 
 
-class TestLaminarTracingClient:
-    def test_unconfigured_reports_false(self, laminar_unconfigured: LaminarTracingClient) -> None:
-        assert laminar_unconfigured.configured is False
-
-    def test_configured_reports_true(self, laminar_configured: LaminarTracingClient) -> None:
-        assert laminar_configured.configured is True
-
-    def test_trace_event_does_not_raise_when_unconfigured(
-        self, laminar_unconfigured: LaminarTracingClient
+class TestLaminarObservability:
+    def test_initialize_returns_false_when_unconfigured(
+        self, unconfigured_settings: Settings
     ) -> None:
-        laminar_unconfigured.trace_event("test_event", {"key": "value"})
+        import observability.laminar as lam_mod
 
-    def test_trace_span_lifecycle(self, laminar_configured: LaminarTracingClient) -> None:
-        span_id = laminar_configured.trace_span_start("test_span", {"detail": "abc"})
-        assert span_id.startswith("span_")
-        laminar_configured.trace_span_end(span_id, {"result": "ok"})
+        lam_mod._initialized = False
+        result = initialize_laminar(unconfigured_settings)
+        assert result is False
+
+    def test_traced_decorator_works_without_initialization(self) -> None:
+        import observability.laminar as lam_mod
+
+        lam_mod._initialized = False
+
+        @traced("test.noop")
+        async def dummy() -> str:
+            return "ok"
+
+        result = asyncio.run(dummy())
+        assert result == "ok"
+
+    def test_traced_sync_decorator_works_without_initialization(self) -> None:
+        import observability.laminar as lam_mod
+
+        lam_mod._initialized = False
+
+        @traced("test.sync_noop")
+        def dummy_sync() -> str:
+            return "sync_ok"
+
+        assert dummy_sync() == "sync_ok"
 
 
 # ── Pydantic Model Shape Tests ──────────────────────────────────────────────

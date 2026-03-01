@@ -28,6 +28,7 @@ from agents.osint_agent import OsintAgent
 from agents.social_agent import SocialAgent
 from agents.twitter_agent import TwitterAgent
 from config import Settings
+from observability.laminar import traced
 
 
 class ResearchOrchestrator:
@@ -49,6 +50,7 @@ class ResearchOrchestrator:
     def agent_names(self) -> list[str]:
         return [a.agent_name for a in self._agents]
 
+    @traced("orchestrator.research_person")
     async def research_person(self, request: ResearchRequest) -> OrchestratorResult:
         """Run all agents in parallel and aggregate results."""
         start = time.monotonic()

@@ -14,6 +14,7 @@ from capture.webhook import router as webhook_router
 from capture.webhook import set_pipeline
 from config import get_settings
 from db.convex_client import ConvexGateway
+from observability.laminar import initialize_laminar
 from db.memory_gateway import InMemoryDatabaseGateway
 from enrichment.exa_client import ExaEnrichmentClient
 from identification.detector import MediaPipeFaceDetector
@@ -24,6 +25,9 @@ from synthesis.engine import GeminiSynthesisEngine
 from tasks import TASK_PHASES
 
 settings = get_settings()
+
+# Initialize Laminar tracing (no-op if LMNR_PROJECT_API_KEY not set)
+initialize_laminar(settings)
 
 # Build pipeline components
 detector = MediaPipeFaceDetector()

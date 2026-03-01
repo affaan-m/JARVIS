@@ -16,6 +16,7 @@ from loguru import logger
 
 from agents.models import AgentResult, AgentStatus, ResearchRequest
 from config import Settings
+from observability.laminar import traced
 
 DEFAULT_TIMEOUT_SECONDS = 180.0
 
@@ -41,6 +42,7 @@ class BaseBrowserAgent(ABC):
         """Subclass-specific research logic. Must return AgentResult."""
         ...
 
+    @traced("agent.run")
     async def run(self, request: ResearchRequest) -> AgentResult:
         """Execute the agent with timeout and error isolation."""
         timeout = request.timeout_seconds or DEFAULT_TIMEOUT_SECONDS
@@ -119,8 +121,21 @@ class BaseBrowserAgent(ABC):
     def _create_browser_agent(self, task: str):
         """Create a Browser Use Agent with cloud session support if BROWSER_USE_API_KEY is set.
 
-        Uses cloud-based browser sessions for persistent cookies and auth reuse.
-        Falls back to local browser if no cloud key is configured.
+        Cloud mode (BROWSER_USE_API_KEY set):
+          - Sets BrowserProfile(use_cloud=True) which connects to Browser Use cloud
+          - The SDK reads BROWSER_USE_API_KEY from env automatically
+          - Cloud sessions persist cookies/auth across runs — log into LinkedIn/Twitter/
+            Instagram once via `browseruse` CLI, and sessions reuse those cookies
+
+        Local mode (no BROWSER_USE_API_KEY):
+          - Falls back to headless local Chromium via Playwright
+
+        To set up authenticated sessions for cloud mode:
+          1. Set BROWSER_USE_API_KEY in your .env
+          2. Run `browseruse` CLI interactively
+          3. Log into LinkedIn, Twitter, Instagram manually
+          4. Sessions persist in your Browser Use cloud profile
+          5. All subsequent agent runs reuse those authenticated sessions
         """
         from browser_use import Agent
         from langchain_openai import ChatOpenAI
@@ -134,25 +149,27 @@ class BaseBrowserAgent(ABC):
 
         if self._settings.browser_use_api_key:
             try:
-                from browser_use.browser.browser import Browser, BrowserConfig
+                from browser_use.browser.profile import BrowserProfile
 
-                browser = Browser(
-                    config=BrowserConfig(
-                        chrome_instance_path=None,
-                        headless=True,
-                        cdp_url=None,
-                    )
+                profile = BrowserProfile(
+                    use_cloud=True,
+                    headless=True,
                 )
-                agent_kwargs["browser"] = browser
+                agent_kwargs["browser_profile"] = profile
                 logger.debug(
-                    "agent={} using Browser Use cloud session",
+                    "agent={} using Browser Use cloud (BROWSER_USE_API_KEY set)",
                     self.agent_name,
                 )
             except Exception as exc:
                 logger.warning(
-                    "agent={} cloud browser setup failed, using default: {}",
+                    "agent={} cloud browser setup failed, using local: {}",
                     self.agent_name,
                     str(exc),
                 )
+        else:
+            logger.debug(
+                "agent={} using local browser (no BROWSER_USE_API_KEY)",
+                self.agent_name,
+            )
 
         return Agent(**agent_kwargs)

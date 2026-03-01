@@ -9,7 +9,7 @@ from config import Settings
 from db.convex_client import ConvexGateway
 from enrichment.exa_client import ExaEnrichmentClient
 from enrichment.models import EnrichmentRequest
-from observability.laminar import LaminarTracingClient
+from observability.laminar import initialize_laminar, traced
 
 # --- ConvexGateway ---
 
@@ -153,32 +153,38 @@ async def test_exa_enrich_person_configured() -> None:
     assert result.hits[0].source == "exa"
 
 
-# --- LaminarTracingClient ---
+# --- Laminar Observability ---
 
 
-def test_laminar_not_configured() -> None:
-    client = LaminarTracingClient(Settings())
-    assert client.configured is False
+def test_laminar_initialize_returns_false_when_unconfigured() -> None:
+    import observability.laminar as lam_mod
+
+    lam_mod._initialized = False
+    result = initialize_laminar(Settings())
+    assert result is False
 
 
-def test_laminar_configured() -> None:
-    client = LaminarTracingClient(Settings(LAMINAR_API_KEY="lam-key"))
-    assert client.configured is True
+def test_traced_async_noop_without_initialization() -> None:
+    import asyncio
+
+    import observability.laminar as lam_mod
+
+    lam_mod._initialized = False
+
+    @traced("test.async_noop")
+    async def dummy() -> str:
+        return "ok"
+
+    assert asyncio.run(dummy()) == "ok"
 
 
-def test_laminar_trace_event_unconfigured_no_crash() -> None:
-    client = LaminarTracingClient(Settings())
-    client.trace_event("test_event", {"key": "value"})
+def test_traced_sync_noop_without_initialization() -> None:
+    import observability.laminar as lam_mod
 
+    lam_mod._initialized = False
 
-def test_laminar_trace_span_start_returns_id() -> None:
-    client = LaminarTracingClient(Settings())
-    span_id = client.trace_span_start("test_span")
-    assert span_id.startswith("span_")
-    assert len(span_id) == 17  # "span_" + 12 hex chars
+    @traced("test.sync_noop")
+    def dummy() -> str:
+        return "sync_ok"
 
-
-def test_laminar_trace_span_end_no_crash() -> None:
-    client = LaminarTracingClient(Settings())
-    span_id = client.trace_span_start("test_span")
-    client.trace_span_end(span_id, {"result": "ok"})
+    assert dummy() == "sync_ok"
