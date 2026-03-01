@@ -26,10 +26,10 @@ class Settings(BaseSettings):
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     gemini_api_key: str | None = Field(default=None, alias="GEMINI_API_KEY")
     laminar_api_key: str | None = Field(default=None, alias="LMNR_PROJECT_API_KEY")
+    anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
     telegram_bot_token: str | None = Field(default=None, alias="TELEGRAM_BOT_TOKEN")
     hibp_api_key: str | None = Field(default=None, alias="HIBP_API_KEY")
     pimeyes_account_pool: str = Field(default="[]", alias="PIMEYES_ACCOUNT_POOL")
-    anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
     daytona_api_key: str | None = Field(default=None, alias="DAYTONA_API_KEY")
     daytona_api_url: str | None = Field(default=None, alias="DAYTONA_API_URL")
     supermemory_api_key: str | None = Field(default=None, alias="SUPERMEMORY_API_KEY")
@@ -43,11 +43,11 @@ class Settings(BaseSettings):
             "browser_use": bool(self.browser_use_api_key),
             "openai": bool(self.openai_api_key),
             "gemini": bool(self.gemini_api_key),
+            "anthropic": bool(self.anthropic_api_key),
             "laminar": bool(self.laminar_api_key),
             "telegram": bool(self.telegram_bot_token),
             "hibp": bool(self.hibp_api_key),
             "pimeyes_pool": self.pimeyes_account_pool not in {"", "[]"},
-            "anthropic": bool(self.anthropic_api_key),
             "daytona": bool(self.daytona_api_key),
             "supermemory": bool(self.supermemory_api_key),
             "hud": bool(self.hud_api_key),

@@ -18,6 +18,7 @@ from identification.models import FaceDetectionRequest, FaceSearchRequest
 from identification.search_manager import FaceSearchManager
 from observability.laminar import traced
 from synthesis.connections import detect_connections
+from synthesis.anthropic_engine import AnthropicSynthesisEngine
 from synthesis.engine import GeminiSynthesisEngine
 from synthesis.models import DossierReport
 from synthesis.models import SocialProfile as SynthSocialProfile
@@ -50,6 +51,7 @@ class CapturePipeline:
         exa_client: ExaEnrichmentClient | None = None,
         orchestrator: ResearchOrchestrator | None = None,
         synthesis_engine: GeminiSynthesisEngine | None = None,
+        synthesis_fallback: AnthropicSynthesisEngine | None = None,
     ) -> None:
         self._detector = detector
         self._embedder = embedder
@@ -58,6 +60,7 @@ class CapturePipeline:
         self._exa = exa_client
         self._orchestrator = orchestrator
         self._synthesis = synthesis_engine
+        self._synthesis_fallback = synthesis_fallback
 
     @traced("pipeline.process")
     async def process(
@@ -262,13 +265,29 @@ class CapturePipeline:
             person_name, exa_result, browser_result,
         )
 
-        # Synthesize with Gemini
+        # Synthesize with Gemini, fall back to Anthropic on 429 rate-limit
         if not self._synthesis:
             logger.warning("No synthesis engine configured, skipping for {}", person_id)
             await self._db.update_person(person_id, {"status": "enriched_no_synthesis"})
             return False
 
         synthesis_result = await self._synthesis.synthesize(synthesis_request)
+
+        # If Gemini hit rate-limit (429) and we have an Anthropic fallback, retry
+        if (
+            not synthesis_result.success
+            and synthesis_result.error
+            and "429" in synthesis_result.error
+            and self._synthesis_fallback
+            and self._synthesis_fallback.configured
+        ):
+            logger.warning(
+                "Gemini 429 for person={}, retrying with Anthropic fallback",
+                person_id,
+            )
+            synthesis_result = await self._synthesis_fallback.synthesize(
+                synthesis_request,
+            )
 
         if not synthesis_result.success:
             logger.warning(

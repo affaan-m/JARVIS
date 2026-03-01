@@ -21,6 +21,7 @@ from identification.detector import MediaPipeFaceDetector
 from identification.embedder import ArcFaceEmbedder
 from pipeline import CapturePipeline
 from schemas import HealthResponse, ServiceStatus, TaskPhase
+from synthesis.anthropic_engine import AnthropicSynthesisEngine
 from synthesis.engine import GeminiSynthesisEngine
 from tasks import TASK_PHASES
 
@@ -41,6 +42,7 @@ db_gateway = convex_gw if convex_gw.configured else InMemoryDatabaseGateway()
 exa_client = ExaEnrichmentClient(settings) if settings.exa_api_key else None
 orchestrator = ResearchOrchestrator(settings) if settings.browser_use_api_key else None
 synthesis_engine = GeminiSynthesisEngine(settings) if settings.gemini_api_key else None
+synthesis_fallback = AnthropicSynthesisEngine(settings) if settings.anthropic_api_key else None
 
 pipeline = CapturePipeline(
     detector=detector,
@@ -49,6 +51,7 @@ pipeline = CapturePipeline(
     exa_client=exa_client,
     orchestrator=orchestrator,
     synthesis_engine=synthesis_engine,
+    synthesis_fallback=synthesis_fallback,
 )
 
 capture_service = CaptureService(pipeline=pipeline)
@@ -66,13 +69,14 @@ telegram_bot: TelegramCaptureBot | None = create_telegram_bot(
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info(
-        "SPECTER started — det={} emb={} db={} exa={} orch={} synth={}",
+        "SPECTER started — det={} emb={} db={} exa={} orch={} synth={} synth_fallback={}",
         detector.__class__.__name__,
         embedder.__class__.__name__,
         db_gateway.__class__.__name__,
         exa_client is not None,
         orchestrator is not None,
         synthesis_engine is not None,
+        synthesis_fallback is not None,
     )
     if telegram_bot:
         await telegram_bot.start()
@@ -118,6 +122,7 @@ async def services() -> list[ServiceStatus]:
         "browser_use": "Deep research browser agents",
         "openai": "Transcription and fallback LLM integrations",
         "gemini": "Primary vision and synthesis model",
+        "anthropic": "Fallback synthesis model (Claude) when Gemini rate-limited",
         "laminar": "Tracing and evaluation telemetry",
         "telegram": "Glasses-side media intake",
         "pimeyes_pool": "Rotating account pool for identification",
