@@ -27,6 +27,32 @@
     #main-video {
       width: 100%; height: 100%; object-fit: contain;
     }
+    /* Detection overlay canvas — sits on top of the video */
+    #detection-overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 4;
+    }
+    /* Hidden canvas for frame capture */
+    #capture-canvas { display: none; }
+    /* Detection status badge */
+    #detection-status {
+      position: absolute; bottom: 16px; left: 16px;
+      padding: 4px 10px; border-radius: 12px; font-size: 11px;
+      font-weight: 500; z-index: 10;
+      background: rgba(255,255,255,0.08); color: #666;
+      transition: all 0.3s;
+    }
+    #detection-status.active { background: rgba(48,209,88,0.2); color: #30d158; }
+    #detection-status.connecting { background: rgba(255,204,0,0.2); color: #ffcc00; }
+    #detection-status.error { background: rgba(255,59,48,0.2); color: #ff3b30; }
+    /* Person count HUD */
+    #person-count {
+      position: absolute; bottom: 16px; right: 16px;
+      padding: 6px 14px; border-radius: 12px; font-size: 13px;
+      font-weight: 600; z-index: 10;
+      background: rgba(0,255,0,0.15); color: #30d158;
+      display: none;
+    }
     #pip-video {
       position: absolute;
       top: 16px; right: 16px;
@@ -126,6 +152,14 @@
       <p>Connected to room. Waiting for stream...</p>
     </div>
 
+    <!-- Detection overlay (drawn on top of video) -->
+    <canvas id="detection-overlay"></canvas>
+    <!-- Hidden canvas for capturing video frames -->
+    <canvas id="capture-canvas"></canvas>
+    <!-- Detection HUD -->
+    <div id="detection-status">Detection: OFF</div>
+    <div id="person-count"></div>
+
     <div id="controls">
       <button id="cam-btn" onclick="toggleCam()">Cam: ON</button>
       <button id="mic-btn" onclick="toggleMic()">Mic: ON</button>
@@ -139,16 +173,30 @@
     let pendingCandidates = [];
     let isSwapped = false;
     let remoteStream = null;
+    let myViewerId = null; // Assigned by server on room_joined
     const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${wsProtocol}//${location.host}`;
+
+    // Auto-reconnect state
+    const MAX_RECONNECT_ATTEMPTS = 5;
+    const RECONNECT_DELAY_MS = 3000;
+    let reconnectAttempts = 0;
+    let reconnectTimer = null;
+    let lastRoomCode = null;
 
     function joinRoom() {
       const code = document.getElementById('room-input').value.toUpperCase().trim();
       if (code.length !== 6) return;
+      lastRoomCode = code;
+      reconnectAttempts = 0;
 
       // Clean up any previous session
       cleanup();
 
+      connectAndJoin(code);
+    }
+
+    function connectAndJoin(code) {
       ws = new WebSocket(wsUrl);
       const sock = ws;
       ws.onopen = () => {
@@ -161,15 +209,38 @@
       ws.onclose = () => {
         setStatus('Disconnected', 'disconnected');
         showControls(false);
+        // Auto-reconnect if we were in a session
+        attemptReconnect();
       };
       ws.onerror = () => {
         setStatus('Connection error', 'disconnected');
       };
     }
 
+    function attemptReconnect() {
+      if (!lastRoomCode || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return;
+      if (reconnectTimer) return; // Already scheduled
+
+      reconnectAttempts++;
+      console.log(`[Reconnect] Attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${RECONNECT_DELAY_MS/1000}s...`);
+      setStatus(`Reconnecting (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`, 'waiting');
+
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        if (!lastRoomCode) return;
+        // Clean up old connection state but keep lastRoomCode
+        if (pc) { pc.close(); pc = null; }
+        if (ws) { ws.close(); ws = null; }
+        connectAndJoin(lastRoomCode);
+      }, RECONNECT_DELAY_MS);
+    }
+
     async function handleSignaling(msg) {
       switch (msg.type) {
         case 'room_joined':
+          // Store viewerId for debugging
+          myViewerId = msg.viewerId || null;
+          console.log('[Signaling] Joined room, viewerId:', myViewerId);
           setStatus('Waiting for stream...', 'waiting');
           document.getElementById('join-panel').style.display = 'none';
           document.getElementById('waiting-msg').style.display = 'block';
@@ -220,6 +291,8 @@
         case 'error':
           setStatus(msg.message, 'disconnected');
           document.getElementById('join-panel').style.display = 'block';
+          // Don't auto-reconnect on server errors like "Room not found"
+          lastRoomCode = null;
           break;
       }
     }
@@ -420,17 +493,29 @@
     }
 
     function cleanup() {
+      // Cancel any pending reconnect
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       if (pc) { pc.close(); pc = null; }
-      if (ws) { ws.close(); ws = null; }
+      if (ws) {
+        ws.onclose = null;  // Prevent triggering auto-reconnect
+        ws.onerror = null;
+        ws.close();
+        ws = null;
+      }
       if (localStream) {
         localStream.getTracks().forEach(t => t.stop());
         localStream = null;
         localVideoStream = null;
       }
       resetVideoElements();
+      myViewerId = null;
     }
 
     function disconnectSession() {
+      lastRoomCode = null; // Prevent auto-reconnect
       cleanup();
       setStatus('Disconnected', 'disconnected');
       showControls(false);
@@ -454,6 +539,243 @@
     document.getElementById('room-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') joinRoom();
     });
+
+    // =====================================================================
+    // DETECTION OVERLAY — Stream frames to Python server, render results
+    // =====================================================================
+    const DETECTION_WS_URL = 'ws://localhost:8765/ws/detect'; // Update for Daytona deployment
+    const DETECTION_FPS = 5;
+    const JPEG_QUALITY = 0.7;
+
+    let detectionWs = null;
+    let detectionInterval = null;
+    let detectionActive = false;
+    let detectionReconnectTimer = null;
+    let latestDetections = [];
+    let overlayRafId = null;
+
+    function getActiveVideoElement() {
+      // Return whichever video element is currently showing the remote stream
+      const pip = document.getElementById('pip-container');
+      if (pip.style.display !== 'none') {
+        const main = document.getElementById('main-video');
+        const pipV = document.getElementById('pip-video');
+        // Remote stream is on main unless swapped
+        return isSwapped ? pipV : main;
+      }
+      return document.getElementById('fallback-video');
+    }
+
+    function captureAndSendFrame() {
+      if (!detectionWs || detectionWs.readyState !== WebSocket.OPEN) return;
+      const video = getActiveVideoElement();
+      if (!video || !video.videoWidth || !video.videoHeight) return;
+
+      const canvas = document.getElementById('capture-canvas');
+      // Send at reduced resolution for speed
+      const sendW = Math.min(video.videoWidth, 640);
+      const sendH = Math.round(sendW * (video.videoHeight / video.videoWidth));
+      canvas.width = sendW;
+      canvas.height = sendH;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, sendW, sendH);
+
+      canvas.toBlob((blob) => {
+        if (blob && detectionWs && detectionWs.readyState === WebSocket.OPEN) {
+          detectionWs.send(blob);
+        }
+      }, 'image/jpeg', JPEG_QUALITY);
+    }
+
+    function startDetection() {
+      if (detectionActive) return;
+      detectionActive = true;
+
+      const statusEl = document.getElementById('detection-status');
+      statusEl.textContent = 'Detection: Connecting...';
+      statusEl.className = 'connecting';
+
+      detectionWs = new WebSocket(DETECTION_WS_URL);
+      detectionWs.binaryType = 'arraybuffer';
+
+      detectionWs.onopen = () => {
+        console.log('[Detection] WebSocket connected');
+        statusEl.textContent = 'Detection: ON';
+        statusEl.className = 'active';
+        // Start frame capture loop
+        detectionInterval = setInterval(captureAndSendFrame, 1000 / DETECTION_FPS);
+        // Start overlay render loop
+        if (!overlayRafId) renderOverlay();
+      };
+
+      detectionWs.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          latestDetections = data.detections || [];
+          // Update person count HUD
+          const countEl = document.getElementById('person-count');
+          if (latestDetections.length > 0) {
+            countEl.style.display = 'block';
+            countEl.textContent = `${latestDetections.length} person${latestDetections.length !== 1 ? 's' : ''}`;
+          } else {
+            countEl.style.display = 'none';
+          }
+        } catch (err) {
+          console.warn('[Detection] Parse error:', err);
+        }
+      };
+
+      detectionWs.onclose = () => {
+        console.log('[Detection] WebSocket closed');
+        clearInterval(detectionInterval);
+        detectionInterval = null;
+        statusEl.textContent = 'Detection: Reconnecting...';
+        statusEl.className = 'connecting';
+        // Auto-reconnect after 2s if still active
+        if (detectionActive) {
+          detectionReconnectTimer = setTimeout(() => {
+            detectionActive = false; // reset flag so startDetection works
+            startDetection();
+          }, 2000);
+        }
+      };
+
+      detectionWs.onerror = (err) => {
+        console.warn('[Detection] WebSocket error:', err);
+        statusEl.textContent = 'Detection: Error';
+        statusEl.className = 'error';
+      };
+    }
+
+    function stopDetection() {
+      detectionActive = false;
+      if (detectionReconnectTimer) {
+        clearTimeout(detectionReconnectTimer);
+        detectionReconnectTimer = null;
+      }
+      if (detectionInterval) {
+        clearInterval(detectionInterval);
+        detectionInterval = null;
+      }
+      if (detectionWs) {
+        detectionWs.close();
+        detectionWs = null;
+      }
+      if (overlayRafId) {
+        cancelAnimationFrame(overlayRafId);
+        overlayRafId = null;
+      }
+      latestDetections = [];
+      // Clear overlay
+      const overlay = document.getElementById('detection-overlay');
+      const ctx = overlay.getContext('2d');
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      // Reset HUD
+      const statusEl = document.getElementById('detection-status');
+      statusEl.textContent = 'Detection: OFF';
+      statusEl.className = '';
+      document.getElementById('person-count').style.display = 'none';
+    }
+
+    function renderOverlay() {
+      const overlay = document.getElementById('detection-overlay');
+      const video = getActiveVideoElement();
+      if (!video) {
+        overlayRafId = requestAnimationFrame(renderOverlay);
+        return;
+      }
+
+      // Match overlay size to container
+      const container = document.getElementById('video-container');
+      const cw = container.clientWidth;
+      const ch = container.clientHeight;
+      if (overlay.width !== cw || overlay.height !== ch) {
+        overlay.width = cw;
+        overlay.height = ch;
+      }
+
+      const ctx = overlay.getContext('2d');
+      ctx.clearRect(0, 0, cw, ch);
+
+      if (!latestDetections.length || !video.videoWidth) {
+        overlayRafId = requestAnimationFrame(renderOverlay);
+        return;
+      }
+
+      // Compute letterbox offset (object-fit: contain)
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      const videoAspect = vw / vh;
+      const containerAspect = cw / ch;
+
+      let renderW, renderH, offsetX, offsetY;
+      if (videoAspect > containerAspect) {
+        // Video wider than container — pillarbox (bars top/bottom)
+        renderW = cw;
+        renderH = cw / videoAspect;
+        offsetX = 0;
+        offsetY = (ch - renderH) / 2;
+      } else {
+        // Video taller — letterbox (bars left/right)
+        renderH = ch;
+        renderW = ch * videoAspect;
+        offsetX = (cw - renderW) / 2;
+        offsetY = 0;
+      }
+
+      // Draw each detection
+      for (const det of latestDetections) {
+        const x1 = offsetX + det.x1 * renderW;
+        const y1 = offsetY + det.y1 * renderH;
+        const x2 = offsetX + det.x2 * renderW;
+        const y2 = offsetY + det.y2 * renderH;
+        const bw = x2 - x1;
+        const bh = y2 - y1;
+
+        const color = det.color || '#00FF00';
+
+        // Bounding box
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x1, y1, bw, bh);
+
+        // Label background
+        const label = `${det.name} ${Math.round(det.confidence * 100)}%`;
+        ctx.font = 'bold 13px -apple-system, BlinkMacSystemFont, sans-serif';
+        const tm = ctx.measureText(label);
+        const labelH = 20;
+        const labelW = tm.width + 10;
+
+        ctx.fillStyle = color;
+        ctx.fillRect(x1, y1 - labelH, labelW, labelH);
+
+        // Label text
+        ctx.fillStyle = '#000';
+        ctx.fillText(label, x1 + 5, y1 - 5);
+      }
+
+      overlayRafId = requestAnimationFrame(renderOverlay);
+    }
+
+    // --- Integration hooks: patch existing functions ---
+    const _origShowVideoLayout = showVideoLayout;
+    showVideoLayout = function() {
+      _origShowVideoLayout();
+      startDetection();
+    };
+
+    const _origResetVideoElements = resetVideoElements;
+    resetVideoElements = function() {
+      stopDetection();
+      _origResetVideoElements();
+    };
+
+    const _origCleanup = cleanup;
+    cleanup = function() {
+      // stopDetection is called via resetVideoElements inside _origCleanup
+      _origCleanup();
+    };
   </script>
 </body>
 </html>

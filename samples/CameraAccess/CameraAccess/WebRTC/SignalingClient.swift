@@ -5,11 +5,11 @@ enum SignalingMessage {
   case roomCreated(String)
   case roomRejoined(String)
   case roomJoined
-  case peerJoined
-  case peerLeft
-  case offer(RTCSessionDescription)
-  case answer(RTCSessionDescription)
-  case candidate(RTCIceCandidate)
+  case peerJoined(viewerId: String)
+  case peerLeft(viewerId: String?)
+  case offer(RTCSessionDescription, viewerId: String?)
+  case answer(RTCSessionDescription, viewerId: String?)
+  case candidate(RTCIceCandidate, viewerId: String?)
   case error(String)
 }
 
@@ -62,17 +62,18 @@ class SignalingClient {
     sendJSON(["type": "rejoin", "room": code])
   }
 
-  func send(sdp: RTCSessionDescription) {
+  func send(sdp: RTCSessionDescription, viewerId: String) {
     let type = sdp.type == .offer ? "offer" : "answer"
-    sendJSON(["type": type, "sdp": sdp.sdp])
+    sendJSON(["type": type, "sdp": sdp.sdp, "viewerId": viewerId])
   }
 
-  func send(candidate: RTCIceCandidate) {
+  func send(candidate: RTCIceCandidate, viewerId: String) {
     sendJSON([
       "type": "candidate",
       "candidate": candidate.sdp,
       "sdpMid": candidate.sdpMid ?? "",
       "sdpMLineIndex": candidate.sdpMLineIndex,
+      "viewerId": viewerId,
     ] as [String: Any])
   }
 
@@ -132,6 +133,8 @@ class SignalingClient {
       let type = json["type"] as? String
     else { return }
 
+    let viewerId = json["viewerId"] as? String
+
     switch type {
     case "room_created":
       if let room = json["room"] as? String {
@@ -147,21 +150,22 @@ class SignalingClient {
       }
 
     case "peer_joined":
-      onMessageReceived?(.peerJoined)
+      let vid = viewerId ?? ""
+      onMessageReceived?(.peerJoined(viewerId: vid))
 
     case "peer_left":
-      onMessageReceived?(.peerLeft)
+      onMessageReceived?(.peerLeft(viewerId: viewerId))
 
     case "offer":
       if let sdp = json["sdp"] as? String {
         let sessionDesc = RTCSessionDescription(type: .offer, sdp: sdp)
-        onMessageReceived?(.offer(sessionDesc))
+        onMessageReceived?(.offer(sessionDesc, viewerId: viewerId))
       }
 
     case "answer":
       if let sdp = json["sdp"] as? String {
         let sessionDesc = RTCSessionDescription(type: .answer, sdp: sdp)
-        onMessageReceived?(.answer(sessionDesc))
+        onMessageReceived?(.answer(sessionDesc, viewerId: viewerId))
       }
 
     case "candidate":
@@ -171,7 +175,7 @@ class SignalingClient {
       {
         let iceCandidate = RTCIceCandidate(
           sdp: candidate, sdpMLineIndex: sdpMLineIndex, sdpMid: sdpMid)
-        onMessageReceived?(.candidate(iceCandidate))
+        onMessageReceived?(.candidate(iceCandidate, viewerId: viewerId))
       }
 
     case "error":

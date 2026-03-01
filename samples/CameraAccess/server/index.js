@@ -1,49 +1,66 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const { WebSocketServer } = require("ws");
+const { WebSocketServer, WebSocket } = require("ws");
+const crypto = require("crypto");
 
 const PORT = process.env.PORT || 8080;
-const rooms = new Map(); // roomCode -> { creator: ws, viewer: ws, destroyTimer: timeout|null }
+const rooms = new Map(); // roomCode -> { creator: ws, viewers: Map<viewerId, ws>, destroyTimer: timeout|null }
 
 // Grace period (ms) before destroying a room when creator disconnects.
 // Allows the iOS user to switch apps (e.g. copy room code, send via WhatsApp) and come back.
 const ROOM_GRACE_PERIOD_MS = 60_000;
 
-// TURN: ExpressTURN (1000 GB/month free, reliable)
-// Ports 3478 (standard), 80, 443 (firewall bypass)
-const EXPRESSTURN_SERVER = process.env.EXPRESSTURN_SERVER || "free.expressturn.com";
-const EXPRESSTURN_USER = process.env.EXPRESSTURN_USER || "efPU52K4SLOQ34W2QY";
-const EXPRESSTURN_PASS = process.env.EXPRESSTURN_PASS || "1TJPNFxHKXrZfelz";
+// Max viewers per room
+const MAX_VIEWERS = 5;
 
-function getTurnCredentials() {
-  return {
-    iceServers: [
-      {
-        urls: [
-          `turn:${EXPRESSTURN_SERVER}:3478`,
-          `turn:${EXPRESSTURN_SERVER}:3478?transport=tcp`,
-          `turn:${EXPRESSTURN_SERVER}:80`,
-          `turn:${EXPRESSTURN_SERVER}:80?transport=tcp`,
-          `turns:${EXPRESSTURN_SERVER}:443?transport=tcp`,
-        ],
-        username: EXPRESSTURN_USER,
-        credential: EXPRESSTURN_PASS,
-      },
-    ],
-  };
+// TURN: Metered TURN (free tier 500MB/month)
+const METERED_APP = process.env.METERED_APP || "ciri.metered.live";
+const METERED_API_KEY = process.env.METERED_API_KEY || "4ea9c11f97051f7c257c72ef8ef6bf34ace6";
+
+// Cache TURN credentials (refresh every 10 minutes since Metered issues time-limited creds)
+let cachedTurnCreds = null;
+let turnCacheExpiry = 0;
+const TURN_CACHE_TTL_MS = 10 * 60 * 1000;
+
+async function fetchTurnCredentials() {
+  const now = Date.now();
+  if (cachedTurnCreds && now < turnCacheExpiry) return cachedTurnCreds;
+
+  try {
+    const url = `https://${METERED_APP}/api/v1/turn/credentials?apiKey=${METERED_API_KEY}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`Metered API ${resp.status}`);
+    const servers = await resp.json();
+    cachedTurnCreds = { iceServers: servers };
+    turnCacheExpiry = now + TURN_CACHE_TTL_MS;
+    console.log(`[TURN] Fetched ${servers.length} ICE servers from Metered`);
+    return cachedTurnCreds;
+  } catch (e) {
+    console.error("[TURN] Failed to fetch Metered credentials:", e.message);
+    // Return STUN-only fallback
+    return { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+  }
+}
+
+function generateViewerId() {
+  return crypto.randomBytes(4).toString("hex");
 }
 
 // HTTP server for serving the web viewer
 const httpServer = http.createServer((req, res) => {
   // TURN credentials API endpoint
   if (req.url === "/api/turn") {
-    const creds = getTurnCredentials();
-    res.writeHead(200, {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
+    fetchTurnCredentials().then((creds) => {
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(JSON.stringify(creds));
+    }).catch((e) => {
+      res.writeHead(500);
+      res.end(JSON.stringify({ error: e.message }));
     });
-    res.end(JSON.stringify(creds));
     return;
   }
 
@@ -76,6 +93,21 @@ const httpServer = http.createServer((req, res) => {
 // WebSocket signaling server
 const wss = new WebSocketServer({ server: httpServer });
 
+// Ping/pong heartbeat to keep connections alive through Fly.io proxy
+// and detect dead connections within ~25-50 seconds
+const PING_INTERVAL_MS = 25_000;
+const pingInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) {
+      console.log(`[WS] Terminating dead connection (no pong response)`);
+      return ws.terminate();
+    }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, PING_INTERVAL_MS);
+wss.on("close", () => clearInterval(pingInterval));
+
 // Fixed room code so the viewer can always connect with the same code
 const FIXED_ROOM_CODE = "VCLAW1";
 
@@ -88,6 +120,10 @@ wss.on("connection", (ws, req) => {
   let role = null; // 'creator' or 'viewer'
   const clientIP = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
   console.log(`[WS] New connection from ${clientIP}`);
+
+  // Track connection liveness for ping/pong
+  ws.isAlive = true;
+  ws.on("pong", () => { ws.isAlive = true; });
 
   ws.on("message", (data) => {
     let msg;
@@ -104,16 +140,21 @@ wss.on("connection", (ws, req) => {
         if (rooms.has(code)) {
           const oldRoom = rooms.get(code);
           if (oldRoom.destroyTimer) clearTimeout(oldRoom.destroyTimer);
-          if (oldRoom.viewer && oldRoom.viewer.readyState === 1) {
-            oldRoom.viewer.send(JSON.stringify({ type: "peer_left" }));
+          // Notify and close all existing viewers
+          for (const [vid, viewerWs] of oldRoom.viewers) {
+            if (viewerWs.readyState === WebSocket.OPEN) {
+              viewerWs.send(JSON.stringify({ type: "peer_left" }));
+              viewerWs.close(1000, "room_replaced");
+            }
           }
-          if (oldRoom.creator && oldRoom.creator !== ws && oldRoom.creator.readyState === 1) {
+          oldRoom.viewers.clear();
+          if (oldRoom.creator && oldRoom.creator !== ws && oldRoom.creator.readyState === WebSocket.OPEN) {
             oldRoom.creator.close();
           }
           rooms.delete(code);
           console.log(`[Room] Replaced existing room: ${code}`);
         }
-        rooms.set(code, { creator: ws, viewer: null, destroyTimer: null });
+        rooms.set(code, { creator: ws, viewers: new Map(), destroyTimer: null });
         currentRoom = code;
         role = "creator";
         ws.send(JSON.stringify({ type: "room_created", room: code }));
@@ -140,10 +181,12 @@ wss.on("connection", (ws, req) => {
         currentRoom = msg.room;
         role = "creator";
         ws.send(JSON.stringify({ type: "room_rejoined", room: msg.room }));
-        // If viewer is already waiting, trigger a new offer
-        if (room.viewer && room.viewer.readyState === 1) {
-          ws.send(JSON.stringify({ type: "peer_joined" }));
-          console.log(`[Room] Viewer already present, notifying rejoined creator: ${msg.room}`);
+        // Notify creator about each existing viewer so it re-negotiates with each
+        for (const [viewerId, viewerWs] of room.viewers) {
+          if (viewerWs.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "peer_joined", viewerId }));
+            console.log(`[Room] Notifying rejoined creator about viewer ${viewerId}: ${msg.room}`);
+          }
         }
         console.log(`[Room] Creator rejoined: ${msg.room}`);
         break;
@@ -157,23 +200,25 @@ wss.on("connection", (ws, req) => {
           );
           return;
         }
-        if (room.viewer) {
-          ws.send(JSON.stringify({ type: "error", message: "Room is full" }));
+        if (room.viewers.size >= MAX_VIEWERS) {
+          ws.send(JSON.stringify({ type: "error", message: "Room is full (max " + MAX_VIEWERS + " viewers)" }));
           return;
         }
-        room.viewer = ws;
+        const viewerId = generateViewerId();
+        ws.viewerId = viewerId;
+        room.viewers.set(viewerId, ws);
         currentRoom = msg.room;
         role = "viewer";
-        ws.send(JSON.stringify({ type: "room_joined" }));
-        // Notify creator that viewer joined (only if creator is connected)
-        if (room.creator && room.creator.readyState === 1) {
-          room.creator.send(JSON.stringify({ type: "peer_joined" }));
+        ws.send(JSON.stringify({ type: "room_joined", viewerId }));
+        // Notify creator that a viewer joined (with viewerId so it can create a dedicated peer connection)
+        if (room.creator && room.creator.readyState === WebSocket.OPEN) {
+          room.creator.send(JSON.stringify({ type: "peer_joined", viewerId }));
         }
-        console.log(`[Room] Viewer joined: ${msg.room}`);
+        console.log(`[Room] Viewer ${viewerId} joined: ${msg.room} (${room.viewers.size} viewer(s))`);
         break;
       }
 
-      // Relay SDP and ICE candidates to the other peer
+      // Relay SDP and ICE candidates between creator and specific viewer
       case "offer":
       case "answer":
       case "candidate": {
@@ -182,12 +227,30 @@ wss.on("connection", (ws, req) => {
           console.log(`[Relay] ${msg.type} from ${role} but room ${currentRoom} not found`);
           return;
         }
-        const target = role === "creator" ? room.viewer : room.creator;
-        if (target && target.readyState === 1) {
-          target.send(JSON.stringify(msg));
-          console.log(`[Relay] ${msg.type} from ${role} -> ${role === "creator" ? "viewer" : "creator"} (room ${currentRoom})`);
+
+        if (role === "creator") {
+          // Creator -> specific viewer (msg must include viewerId)
+          const targetViewerId = msg.viewerId;
+          if (!targetViewerId) {
+            console.log(`[Relay] ${msg.type} from creator missing viewerId`);
+            return;
+          }
+          const targetViewer = room.viewers.get(targetViewerId);
+          if (targetViewer && targetViewer.readyState === WebSocket.OPEN) {
+            targetViewer.send(JSON.stringify(msg));
+            console.log(`[Relay] ${msg.type} from creator -> viewer ${targetViewerId} (room ${currentRoom})`);
+          } else {
+            console.log(`[Relay] ${msg.type} from creator but viewer ${targetViewerId} not ready (room ${currentRoom})`);
+          }
         } else {
-          console.log(`[Relay] ${msg.type} from ${role} but target not ready (room ${currentRoom})`);
+          // Viewer -> creator (attach viewerId from the ws)
+          const relayMsg = { ...msg, viewerId: ws.viewerId };
+          if (room.creator && room.creator.readyState === WebSocket.OPEN) {
+            room.creator.send(JSON.stringify(relayMsg));
+            console.log(`[Relay] ${msg.type} from viewer ${ws.viewerId} -> creator (room ${currentRoom})`);
+          } else {
+            console.log(`[Relay] ${msg.type} from viewer ${ws.viewerId} but creator not ready (room ${currentRoom})`);
+          }
         }
         break;
       }
@@ -203,30 +266,43 @@ wss.on("connection", (ws, req) => {
 
     if (currentRoom && rooms.has(currentRoom)) {
       const room = rooms.get(currentRoom);
-      const otherPeer = role === "creator" ? room.viewer : room.creator;
-      if (otherPeer && otherPeer.readyState === 1) {
-        otherPeer.send(JSON.stringify({ type: "peer_left" }));
-      }
+
       if (role === "creator") {
+        // Notify ALL viewers that the creator left
+        for (const [viewerId, viewerWs] of room.viewers) {
+          if (viewerWs.readyState === WebSocket.OPEN) {
+            viewerWs.send(JSON.stringify({ type: "peer_left" }));
+          }
+        }
         // Don't destroy immediately -- give the creator a grace period to reconnect
-        // (e.g. switching to WhatsApp to share the room code)
         room.creator = null;
         room.destroyTimer = setTimeout(() => {
           if (rooms.has(currentRoom)) {
             const r = rooms.get(currentRoom);
             // Only destroy if creator never came back
-            if (!r.creator || r.creator.readyState !== 1) {
-              if (r.viewer && r.viewer.readyState === 1) {
-                r.viewer.send(JSON.stringify({ type: "error", message: "Stream ended" }));
+            if (!r.creator || r.creator.readyState !== WebSocket.OPEN) {
+              // Notify all remaining viewers that the stream has ended
+              for (const [vid, viewerWs] of r.viewers) {
+                if (viewerWs.readyState === WebSocket.OPEN) {
+                  viewerWs.send(JSON.stringify({ type: "error", message: "Stream ended" }));
+                }
               }
+              r.viewers.clear();
               rooms.delete(currentRoom);
               console.log(`[Room] Destroyed after grace period: ${currentRoom}`);
             }
           }
         }, ROOM_GRACE_PERIOD_MS);
         console.log(`[Room] Creator disconnected, grace period started (${ROOM_GRACE_PERIOD_MS / 1000}s): ${currentRoom}`);
-      } else {
-        room.viewer = null;
+      } else if (role === "viewer") {
+        // Remove this viewer from the room
+        const viewerId = ws.viewerId;
+        room.viewers.delete(viewerId);
+        // Notify creator that this specific viewer left
+        if (room.creator && room.creator.readyState === WebSocket.OPEN) {
+          room.creator.send(JSON.stringify({ type: "peer_left", viewerId }));
+        }
+        console.log(`[Room] Viewer ${viewerId} left: ${currentRoom} (${room.viewers.size} viewer(s) remaining)`);
       }
     }
   });

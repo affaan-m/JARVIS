@@ -12,6 +12,7 @@ enum WebRTCConnectionState: Equatable {
 }
 
 /// Orchestrates the WebRTC live streaming session: signaling, peer connection, and frame forwarding.
+/// Supports multiple simultaneous viewers — each viewer gets its own WebRTCClient (RTCPeerConnection).
 /// Follows the same @MainActor ObservableObject pattern as GeminiSessionViewModel.
 @MainActor
 class WebRTCSessionViewModel: ObservableObject {
@@ -23,9 +24,13 @@ class WebRTCSessionViewModel: ObservableObject {
   @Published var remoteVideoTrack: RTCVideoTrack?
   @Published var hasRemoteVideo: Bool = false
 
-  private var webRTCClient: WebRTCClient?
+  /// One WebRTCClient per viewer, keyed by viewerId
+  private var peerConnections: [String: WebRTCClient] = [:]
+  private var delegateAdapters: [String: WebRTCDelegateAdapter] = [:]
   private var signalingClient: SignalingClient?
-  private var delegateAdapter: WebRTCDelegateAdapter?
+
+  /// ICE servers fetched once and reused for all peer connections
+  private var cachedIceServers: [RTCIceServer]?
 
   /// Saved room code for reconnecting after app backgrounding.
   private var savedRoomCode: String?
@@ -43,18 +48,21 @@ class WebRTCSessionViewModel: ObservableObject {
     savedRoomCode = nil
 
     // Fetch TURN credentials for NAT traversal across networks
-    let iceServers = await WebRTCConfig.fetchIceServers()
+    cachedIceServers = await WebRTCConfig.fetchIceServers()
 
-    setupWebRTCClient(iceServers: iceServers)
     connectSignaling(rejoinCode: nil)
     observeForeground()
   }
 
   func stopSession() {
     removeForegroundObserver()
-    webRTCClient?.close()
-    webRTCClient = nil
-    delegateAdapter = nil
+    // Close ALL peer connections
+    for (viewerId, client) in peerConnections {
+      client.close()
+      NSLog("[WebRTC] Closed peer connection for viewer %@", viewerId)
+    }
+    peerConnections.removeAll()
+    delegateAdapters.removeAll()
     signalingClient?.disconnect()
     signalingClient = nil
     isActive = false
@@ -64,29 +72,57 @@ class WebRTCSessionViewModel: ObservableObject {
     isMuted = false
     remoteVideoTrack = nil
     hasRemoteVideo = false
+    cachedIceServers = nil
   }
 
   func toggleMute() {
     isMuted.toggle()
-    webRTCClient?.muteAudio(isMuted)
+    for (_, client) in peerConnections {
+      client.muteAudio(isMuted)
+    }
   }
 
   /// Called by StreamSessionViewModel on each video frame.
+  /// Pushes to ALL active peer connections.
   func pushVideoFrame(_ image: UIImage) {
     guard isActive, connectionState == .connected else { return }
-    webRTCClient?.pushVideoFrame(image)
+    for (_, client) in peerConnections {
+      client.pushVideoFrame(image)
+    }
   }
 
-  // MARK: - WebRTC + Signaling Setup
+  // MARK: - Peer Connection Management
 
-  private func setupWebRTCClient(iceServers: [RTCIceServer]?) {
+  private func createPeerConnection(for viewerId: String) {
+    // Close existing connection for this viewer if any
+    if let existing = peerConnections[viewerId] {
+      existing.close()
+    }
+
     let client = WebRTCClient()
-    let adapter = WebRTCDelegateAdapter(viewModel: self)
-    delegateAdapter = adapter
+    let adapter = WebRTCDelegateAdapter(viewModel: self, viewerId: viewerId)
+    delegateAdapters[viewerId] = adapter
     client.delegate = adapter
-    client.setup(iceServers: iceServers)
-    webRTCClient = client
+    client.setup(iceServers: cachedIceServers)
+    peerConnections[viewerId] = client
+    client.muteAudio(isMuted)
+    NSLog("[WebRTC] Created peer connection for viewer %@", viewerId)
   }
+
+  private func removePeerConnection(for viewerId: String) {
+    if let client = peerConnections.removeValue(forKey: viewerId) {
+      client.close()
+      NSLog("[WebRTC] Removed peer connection for viewer %@", viewerId)
+    }
+    delegateAdapters.removeValue(forKey: viewerId)
+
+    // Update connection state if no more viewers
+    if peerConnections.isEmpty {
+      connectionState = .waitingForPeer
+    }
+  }
+
+  // MARK: - Signaling Setup
 
   private func connectSignaling(rejoinCode: String?) {
     signalingClient?.disconnect()
@@ -161,14 +197,17 @@ class WebRTCSessionViewModel: ObservableObject {
     NSLog("[WebRTC] App returned to foreground, reconnecting to room: %@", code)
     connectionState = .connecting
 
-    // Tear down old peer connection, set up fresh one
-    webRTCClient?.close()
+    // Tear down ALL old peer connections
+    for (viewerId, client) in peerConnections {
+      client.close()
+    }
+    peerConnections.removeAll()
+    delegateAdapters.removeAll()
     remoteVideoTrack = nil
     hasRemoteVideo = false
 
     Task {
-      let iceServers = await WebRTCConfig.fetchIceServers()
-      setupWebRTCClient(iceServers: iceServers)
+      cachedIceServers = await WebRTCConfig.fetchIceServers()
       connectSignaling(rejoinCode: code)
     }
   }
@@ -189,29 +228,43 @@ class WebRTCSessionViewModel: ObservableObject {
       connectionState = .waitingForPeer
       NSLog("[WebRTC] Room rejoined: %@", code)
 
-    case .peerJoined:
-      NSLog("[WebRTC] Peer joined, creating offer")
-      webRTCClient?.createOffer { [weak self] sdp in
-        self?.signalingClient?.send(sdp: sdp)
+    case .peerJoined(let viewerId):
+      NSLog("[WebRTC] Peer joined (viewerId: %@), creating offer", viewerId)
+      createPeerConnection(for: viewerId)
+      peerConnections[viewerId]?.createOffer { [weak self] sdp in
+        self?.signalingClient?.send(sdp: sdp, viewerId: viewerId)
       }
 
-    case .answer(let sdp):
-      webRTCClient?.set(remoteSdp: sdp) { error in
+    case .answer(let sdp, let viewerId):
+      guard let viewerId, let client = peerConnections[viewerId] else {
+        NSLog("[WebRTC] Answer received but no peer connection for viewerId: %@", viewerId ?? "nil")
+        return
+      }
+      client.set(remoteSdp: sdp) { error in
         if let error {
-          NSLog("[WebRTC] Error setting remote SDP: %@", error.localizedDescription)
+          NSLog("[WebRTC] Error setting remote SDP for viewer %@: %@", viewerId, error.localizedDescription)
         }
       }
 
-    case .candidate(let candidate):
-      webRTCClient?.set(remoteCandidate: candidate) { error in
+    case .candidate(let candidate, let viewerId):
+      guard let viewerId, let client = peerConnections[viewerId] else {
+        NSLog("[WebRTC] Candidate received but no peer connection for viewerId: %@", viewerId ?? "nil")
+        return
+      }
+      client.set(remoteCandidate: candidate) { error in
         if let error {
-          NSLog("[WebRTC] Error adding ICE candidate: %@", error.localizedDescription)
+          NSLog("[WebRTC] Error adding ICE candidate for viewer %@: %@", viewerId, error.localizedDescription)
         }
       }
 
-    case .peerLeft:
-      NSLog("[WebRTC] Peer left")
-      connectionState = .waitingForPeer
+    case .peerLeft(let viewerId):
+      if let viewerId {
+        NSLog("[WebRTC] Peer left (viewerId: %@)", viewerId)
+        removePeerConnection(for: viewerId)
+      } else {
+        NSLog("[WebRTC] Peer left (no viewerId)")
+        connectionState = .waitingForPeer
+      }
 
     case .error(let msg):
       // If rejoin fails (room expired), fall back to creating a new room
@@ -228,71 +281,86 @@ class WebRTCSessionViewModel: ObservableObject {
     }
   }
 
-  // MARK: - Connection State Updates (from WebRTCClient delegate)
+  // MARK: - Connection State Updates (from WebRTCClient delegate, per viewer)
 
-  fileprivate func handleConnectionStateChange(_ state: RTCIceConnectionState) {
+  fileprivate func handleConnectionStateChange(_ state: RTCIceConnectionState, viewerId: String) {
     switch state {
     case .connected, .completed:
       connectionState = .connected
-      NSLog("[WebRTC] Peer connected")
+      NSLog("[WebRTC] Peer connected (viewerId: %@)", viewerId)
     case .disconnected:
-      connectionState = .waitingForPeer
+      // Only go to waitingForPeer if ALL peer connections are disconnected
+      let anyConnected = peerConnections.values.contains { _ in true }
+      if !anyConnected {
+        connectionState = .waitingForPeer
+      }
     case .failed:
-      connectionState = .error("Connection failed")
+      NSLog("[WebRTC] Peer connection failed (viewerId: %@)", viewerId)
+      removePeerConnection(for: viewerId)
     case .closed:
-      connectionState = .disconnected
+      break
     default:
       break
     }
   }
 
-  fileprivate func handleGeneratedCandidate(_ candidate: RTCIceCandidate) {
-    signalingClient?.send(candidate: candidate)
+  fileprivate func handleGeneratedCandidate(_ candidate: RTCIceCandidate, viewerId: String) {
+    signalingClient?.send(candidate: candidate, viewerId: viewerId)
   }
 
-  fileprivate func handleRemoteVideoTrackReceived(_ track: RTCVideoTrack) {
+  fileprivate func handleRemoteVideoTrackReceived(_ track: RTCVideoTrack, viewerId: String) {
     remoteVideoTrack = track
     hasRemoteVideo = true
-    NSLog("[WebRTC] Remote video track received")
+    NSLog("[WebRTC] Remote video track received from viewer %@", viewerId)
   }
 
-  fileprivate func handleRemoteVideoTrackRemoved(_ track: RTCVideoTrack) {
-    remoteVideoTrack = nil
-    hasRemoteVideo = false
-    NSLog("[WebRTC] Remote video track removed")
+  fileprivate func handleRemoteVideoTrackRemoved(_ track: RTCVideoTrack, viewerId: String) {
+    // Only clear if this was the currently displayed track
+    if remoteVideoTrack === track {
+      remoteVideoTrack = nil
+      hasRemoteVideo = false
+    }
+    NSLog("[WebRTC] Remote video track removed from viewer %@", viewerId)
   }
 }
 
 // MARK: - Delegate Adapter (bridges nonisolated delegate to @MainActor ViewModel)
+// Each viewer gets its own adapter instance that tags callbacks with viewerId.
 
 private class WebRTCDelegateAdapter: WebRTCClientDelegate {
   private weak var viewModel: WebRTCSessionViewModel?
+  private let viewerId: String
 
-  init(viewModel: WebRTCSessionViewModel) {
+  init(viewModel: WebRTCSessionViewModel, viewerId: String) {
     self.viewModel = viewModel
+    self.viewerId = viewerId
   }
 
   func webRTCClient(_ client: WebRTCClient, didChangeConnectionState state: RTCIceConnectionState) {
+    let vid = viewerId
     Task { @MainActor [weak self] in
-      self?.viewModel?.handleConnectionStateChange(state)
+      self?.viewModel?.handleConnectionStateChange(state, viewerId: vid)
     }
   }
 
   func webRTCClient(_ client: WebRTCClient, didGenerateCandidate candidate: RTCIceCandidate) {
+    let vid = viewerId
     Task { @MainActor [weak self] in
-      self?.viewModel?.handleGeneratedCandidate(candidate)
+      self?.viewModel?.handleGeneratedCandidate(candidate, viewerId: vid)
     }
   }
 
   func webRTCClient(_ client: WebRTCClient, didReceiveRemoteVideoTrack track: RTCVideoTrack) {
+    let vid = viewerId
     Task { @MainActor [weak self] in
-      self?.viewModel?.handleRemoteVideoTrackReceived(track)
+      self?.viewModel?.handleRemoteVideoTrackReceived(track, viewerId: vid)
     }
   }
 
   func webRTCClient(_ client: WebRTCClient, didRemoveRemoteVideoTrack track: RTCVideoTrack) {
+    let vid = viewerId
     Task { @MainActor [weak self] in
-      self?.viewModel?.handleRemoteVideoTrackRemoved(track)
+      self?.viewModel?.handleRemoteVideoTrackRemoved(track, viewerId: vid)
     }
   }
 }
