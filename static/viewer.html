@@ -668,6 +668,10 @@ function setStatus(cls, text) {
 setInterval(() => {
   fetch('/api/health').catch(() => {});
 }, 5 * 60 * 1000);
+
+// Auto-connect to glasses room VCLAW1 on page load
+document.getElementById('roomCode').value = 'VCLAW1';
+connectGlasses();
 </script>
 </body>
 </html>
