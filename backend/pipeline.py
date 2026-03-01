@@ -14,7 +14,8 @@ from enrichment.exa_client import ExaEnrichmentClient
 from enrichment.models import EnrichmentRequest, EnrichmentResult
 from identification import FaceDetector
 from identification.embedder import ArcFaceEmbedder
-from identification.models import FaceDetectionRequest
+from identification.models import FaceDetectionRequest, FaceSearchRequest
+from identification.search_manager import FaceSearchManager
 from synthesis.engine import GeminiSynthesisEngine
 from synthesis.models import SocialProfile as SynthSocialProfile
 from synthesis.models import SynthesisRequest
@@ -42,6 +43,7 @@ class CapturePipeline:
         detector: FaceDetector,
         embedder: ArcFaceEmbedder,
         db: DatabaseGateway,
+        face_searcher: FaceSearchManager | None = None,
         exa_client: ExaEnrichmentClient | None = None,
         orchestrator: ResearchOrchestrator | None = None,
         synthesis_engine: GeminiSynthesisEngine | None = None,
@@ -49,6 +51,7 @@ class CapturePipeline:
         self._detector = detector
         self._embedder = embedder
         self._db = db
+        self._face_searcher = face_searcher
         self._exa = exa_client
         self._orchestrator = orchestrator
         self._synthesis = synthesis_engine
@@ -97,9 +100,11 @@ class CapturePipeline:
 
         logger.info("Extracted {} frame(s) from capture={}", len(frames), capture_id)
 
-        # Step 2 + 3 + 4: Detect, embed, store for each frame
+        # Step 2 + 3 + 4: Detect, embed, face-search, store for each frame
         total_faces = 0
         persons_created: list[str] = []
+        # Maps person_id -> (resolved_name, face_image_bytes)
+        person_identities: dict[str, tuple[str, bytes]] = {}
 
         for frame_idx, frame_bytes in enumerate(frames):
             request = FaceDetectionRequest(image_data=frame_bytes)
@@ -118,32 +123,49 @@ class CapturePipeline:
                 # Generate embedding
                 embedding = self._embedder.embed(face, frame_bytes)
 
+                # Step 3.5: Face search — identify who this person is
+                resolved_name = person_name  # Use provided name as default
+                if not resolved_name and self._face_searcher:
+                    resolved_name = await self._identify_face(
+                        embedding, frame_bytes,
+                    )
+
                 # Create person record
                 person_id = f"person_{uuid4().hex[:12]}"
-                await self._db.store_person(person_id, {
+                person_data: dict = {
                     "capture_id": capture_id,
                     "frame_index": frame_idx,
                     "bbox": face.bbox.model_dump(),
                     "confidence": face.confidence,
                     "embedding": embedding,
                     "status": "detected",
-                })
+                }
+                if resolved_name:
+                    person_data["name"] = resolved_name
+                    person_data["status"] = "identified"
+
+                await self._db.store_person(person_id, person_data)
                 persons_created.append(person_id)
 
+                if resolved_name:
+                    person_identities[person_id] = (resolved_name, frame_bytes)
+
                 logger.info(
-                    "Created person={} from capture={} frame={} confidence={:.2f}",
-                    person_id, capture_id, frame_idx, face.confidence,
+                    "Created person={} name={} from capture={} frame={} confidence={:.2f}",
+                    person_id, resolved_name or "unknown",
+                    capture_id, frame_idx, face.confidence,
                 )
 
-        # Step 5: Enrich + research + synthesize each person (error-isolated)
+        # Step 5: Enrich + research + synthesize each identified person (error-isolated)
         persons_enriched = 0
-        if persons_created and person_name:
+        if person_identities:
             enrichment_tasks = [
-                self._enrich_person(pid, person_name)
-                for pid in persons_created
+                self._enrich_person(pid, name)
+                for pid, (name, _img) in person_identities.items()
             ]
+            pids = list(person_identities.keys())
             results = await asyncio.gather(*enrichment_tasks, return_exceptions=True)
-            for pid, result in zip(persons_created, results, strict=True):
+            for pid, result in zip(pids, results, strict=True):
                 if isinstance(result, Exception):
                     logger.error("Enrichment crashed for person={}: {}", pid, result)
                 elif result:
@@ -172,6 +194,39 @@ class CapturePipeline:
             persons_enriched=persons_enriched,
             success=True,
         )
+
+    async def _identify_face(
+        self, embedding: list[float], image_data: bytes
+    ) -> str | None:
+        """Use face search to identify a person from their face image.
+
+        Returns the best-guess person name, or None if search fails.
+        """
+        if not self._face_searcher:
+            return None
+
+        try:
+            search_request = FaceSearchRequest(
+                embedding=embedding,
+                image_data=image_data,
+            )
+            search_result = await self._face_searcher.search_face(search_request)
+
+            if not search_result.success:
+                logger.warning("Face search failed: {}", search_result.error)
+                return None
+
+            name = self._face_searcher.best_name_from_results(search_result)
+            if name:
+                logger.info("Face search identified person as: {}", name)
+            else:
+                logger.info("Face search found {} matches but no name", len(search_result.matches))
+
+            return name
+
+        except Exception as exc:
+            logger.error("Face search crashed: {}", exc)
+            return None
 
     async def _enrich_person(self, person_id: str, person_name: str) -> bool:
         """Run Exa enrichment + browser research in parallel, then synthesize.

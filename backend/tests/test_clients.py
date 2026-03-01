@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -55,22 +55,48 @@ async def test_convex_store_capture_unconfigured_raises() -> None:
 @pytest.mark.anyio
 async def test_convex_store_person_configured_returns_id() -> None:
     gw = ConvexGateway(Settings(CONVEX_URL="https://convex.example.com"))
+    gw._mutation = AsyncMock(return_value="p1")
     result = await gw.store_person("p1", {"name": "Alice"})
     assert result == "p1"
+    gw._mutation.assert_called_once()
 
 
 @pytest.mark.anyio
 async def test_convex_get_person_configured_returns_none() -> None:
     gw = ConvexGateway(Settings(CONVEX_URL="https://convex.example.com"))
+    gw._query = AsyncMock(return_value=None)
     result = await gw.get_person("p1")
     assert result is None
+    gw._query.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_convex_update_person_configured() -> None:
+    gw = ConvexGateway(Settings(CONVEX_URL="https://convex.example.com"))
+    gw._mutation = AsyncMock(return_value=None)
+    await gw.update_person("p1", {"status": "enriched"})
+    gw._mutation.assert_called_once_with(
+        "persons:update", {"person_id": "p1", "data": {"status": "enriched"}},
+    )
 
 
 @pytest.mark.anyio
 async def test_convex_store_capture_configured_returns_id() -> None:
     gw = ConvexGateway(Settings(CONVEX_URL="https://convex.example.com"))
+    gw._mutation = AsyncMock(return_value="c1")
     result = await gw.store_capture("c1", {"source": "camera"})
     assert result == "c1"
+    gw._mutation.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_convex_store_person_strips_embedding() -> None:
+    gw = ConvexGateway(Settings(CONVEX_URL="https://convex.example.com"))
+    gw._mutation = AsyncMock(return_value="p1")
+    await gw.store_person("p1", {"name": "Alice", "embedding": [0.1] * 512})
+    call_args = gw._mutation.call_args[0][1]
+    assert "embedding" not in call_args["data"]
+    assert call_args["data"]["person_id"] == "p1"
 
 
 # --- ExaEnrichmentClient ---

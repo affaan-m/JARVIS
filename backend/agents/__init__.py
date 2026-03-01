@@ -15,6 +15,7 @@ __all__ = [
     "AgentResult",
     "AgentStatus",
     "DarkwebAgent",
+    "InstagramAgent",
     "OrchestratorResult",
     "OsintAgent",
     "ResearchOrchestrator",

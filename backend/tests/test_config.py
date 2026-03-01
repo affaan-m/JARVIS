@@ -49,6 +49,7 @@ def test_settings_service_flags_with_all_keys() -> None:
         "GEMINI_API_KEY": "gem-key",
         "LAMINAR_API_KEY": "lam-key",
         "TELEGRAM_BOT_TOKEN": "bot-token",
+        "HIBP_API_KEY": "hibp-key",
         "PIMEYES_ACCOUNT_POOL": '[{"email": "a@b.com"}]',
     }
     with patch.dict(os.environ, env):
@@ -84,6 +85,6 @@ def test_settings_service_flags_has_all_expected_keys() -> None:
     flags = s.service_flags()
     expected_keys = {
         "convex", "mongodb", "exa", "browser_use", "openai",
-        "gemini", "laminar", "telegram", "pimeyes_pool",
+        "gemini", "laminar", "telegram", "hibp", "pimeyes_pool",
     }
     assert set(flags.keys()) == expected_keys

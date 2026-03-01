@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import ValidationError
@@ -116,12 +116,14 @@ class TestConvexGateway:
             asyncio.run(convex_unconfigured.store_person("p_1", {"name": "Test"}))
 
     def test_store_person_returns_id(self, convex_configured: ConvexGateway) -> None:
+        convex_configured._mutation = AsyncMock(return_value="p_1")
         result = asyncio.run(convex_configured.store_person("p_1", {"name": "Test"}))
         assert result == "p_1"
 
     def test_get_person_returns_none_placeholder(
         self, convex_configured: ConvexGateway
     ) -> None:
+        convex_configured._query = AsyncMock(return_value=None)
         result = asyncio.run(convex_configured.get_person("p_1"))
         assert result is None
 
@@ -132,6 +134,7 @@ class TestConvexGateway:
             asyncio.run(convex_unconfigured.store_capture("cap_1", {"file": "test.jpg"}))
 
     def test_store_capture_returns_id(self, convex_configured: ConvexGateway) -> None:
+        convex_configured._mutation = AsyncMock(return_value="cap_1")
         result = asyncio.run(convex_configured.store_capture("cap_1", {"file": "test.jpg"}))
         assert result == "cap_1"
 

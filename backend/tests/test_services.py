@@ -33,7 +33,7 @@ def test_services_include_known_service_names() -> None:
 
     expected = {
         "convex", "mongodb", "exa", "browser_use", "openai",
-        "gemini", "laminar", "telegram", "pimeyes_pool",
+        "gemini", "laminar", "telegram", "hibp", "pimeyes_pool",
     }
     assert names == expected
 

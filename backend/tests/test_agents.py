@@ -19,7 +19,8 @@ import pytest
 from agents.browser_agent import BaseBrowserAgent
 from agents.darkweb_agent import DarkwebAgent
 from agents.google_agent import GoogleAgent
-from agents.linkedin_agent import LinkedInAgent
+from agents.instagram_agent import InstagramAgent, _parse_instagram_output
+from agents.linkedin_agent import LinkedInAgent, _parse_linkedin_output
 from agents.models import (
     AgentResult,
     AgentStatus,
@@ -30,7 +31,7 @@ from agents.models import (
 from agents.orchestrator import ResearchOrchestrator, _deduplicate_profiles
 from agents.osint_agent import OsintAgent
 from agents.social_agent import SocialAgent
-from agents.twitter_agent import TwitterAgent
+from agents.twitter_agent import TwitterAgent, _parse_twitter_output
 from config import Settings
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -374,6 +375,154 @@ class TestDarkwebAgent:
             assert any("No breaches" in s or "no results" in s.lower() for s in result.snippets)
 
 
+# ── Instagram Agent Tests ────────────────────────────────────────────────────
+
+
+class TestInstagramAgent:
+    def test_fails_when_unconfigured(
+        self, unconfigured_settings: Settings, research_request: ResearchRequest
+    ) -> None:
+        agent = InstagramAgent(unconfigured_settings)
+        result = asyncio.run(agent.run(research_request))
+        assert result.status == AgentStatus.FAILED
+        assert "not configured" in result.error
+
+    def test_agent_name(self, configured_settings: Settings) -> None:
+        agent = InstagramAgent(configured_settings)
+        assert agent.agent_name == "instagram"
+
+    def test_configured_with_keys(self, configured_settings: Settings) -> None:
+        agent = InstagramAgent(configured_settings)
+        assert agent.configured is True
+
+
+# ── LinkedIn Parser Tests ───────────────────────────────────────────────────
+
+
+class TestLinkedInParser:
+    def test_parse_valid_json(self) -> None:
+        import json
+
+        data = {
+            "full_name": "Jane Doe",
+            "headline": "CEO at BigCo",
+            "location": "SF",
+            "about": "Builder.",
+            "current_company": "BigCo",
+            "current_title": "CEO",
+            "experience": [{"title": "CEO", "company": "BigCo", "duration": "2y"}],
+            "education": [{"school": "MIT", "degree": "BS", "field": "CS"}],
+            "skills": ["Python", "Leadership"],
+            "connections_count": "500+",
+            "recent_posts": [{"text": "Launched v2!", "date": "2026-02-01"}],
+            "profile_url": "https://linkedin.com/in/janedoe",
+        }
+        raw = json.dumps(data)
+        result = _parse_linkedin_output(raw, "Jane Doe")
+        assert result["profile"].platform == "linkedin"
+        assert result["profile"].display_name == "Jane Doe"
+        assert result["profile"].url == "https://linkedin.com/in/janedoe"
+        assert result["profile"].bio == "CEO at BigCo"
+        assert result["profile"].followers == 500
+        assert len(result["snippets"]) > 0
+
+    def test_parse_invalid_json_falls_back(self) -> None:
+        raw = "Some random text about the person"
+        result = _parse_linkedin_output(raw, "John Doe")
+        assert result["profile"].platform == "linkedin"
+        assert result["profile"].display_name == "John Doe"
+        assert len(result["snippets"]) > 0
+        assert raw[:500] in result["snippets"][0]
+
+    def test_parse_empty_json(self) -> None:
+        raw = "{}"
+        result = _parse_linkedin_output(raw, "Test")
+        assert result["profile"].platform == "linkedin"
+        assert result["profile"].display_name == "Test"
+
+
+# ── Twitter Parser Tests ────────────────────────────────────────────────────
+
+
+class TestTwitterParser:
+    def test_parse_valid_json(self) -> None:
+        import json
+
+        data = {
+            "username": "johndoe",
+            "display_name": "John Doe",
+            "bio": "Builder of things",
+            "followers": 1500,
+            "following": 300,
+            "tweets_count": 5000,
+            "location": "SF",
+            "verified": True,
+            "recent_tweets": [{"text": "Hello world", "date": "2026-02-01", "likes": 42}],
+            "interests": ["tech", "AI"],
+            "profile_url": "https://x.com/johndoe",
+        }
+        raw = json.dumps(data)
+        result = _parse_twitter_output(raw, "John Doe")
+        assert result["profile"].platform == "twitter"
+        assert result["profile"].username == "johndoe"
+        assert result["profile"].followers == 1500
+        assert result["profile"].verified is True
+        assert len(result["snippets"]) > 0
+
+    def test_parse_invalid_json_falls_back(self) -> None:
+        raw = "Could not find the profile"
+        result = _parse_twitter_output(raw, "John Doe")
+        assert result["profile"].platform == "twitter"
+        assert result["profile"].display_name == "John Doe"
+        assert len(result["snippets"]) > 0
+
+    def test_parse_empty_json(self) -> None:
+        raw = "{}"
+        result = _parse_twitter_output(raw, "Test")
+        assert result["profile"].platform == "twitter"
+        assert result["profile"].display_name == "Test"
+
+
+# ── Instagram Parser Tests ──────────────────────────────────────────────────
+
+
+class TestInstagramParser:
+    def test_parse_valid_json(self) -> None:
+        import json
+
+        data = {
+            "username": "janedoe",
+            "display_name": "Jane Doe",
+            "bio": "Photographer",
+            "followers": 10000,
+            "following": 500,
+            "post_count": 150,
+            "is_verified": False,
+            "is_private": False,
+            "recent_posts": [
+                {"caption": "Sunset shot", "likes": 200, "date": "2026-02-01"}
+            ],
+            "profile_url": "https://instagram.com/janedoe",
+        }
+        raw = json.dumps(data)
+        result = _parse_instagram_output(raw, "Jane Doe")
+        assert result["profile"].platform == "instagram"
+        assert result["profile"].username == "janedoe"
+        assert result["profile"].followers == 10000
+        assert len(result["snippets"]) > 0
+
+    def test_parse_invalid_json_falls_back(self) -> None:
+        raw = "No profile found"
+        result = _parse_instagram_output(raw, "Jane Doe")
+        assert result["profile"].platform == "instagram"
+        assert len(result["snippets"]) > 0
+
+    def test_parse_private_account(self) -> None:
+        raw = '{"username": "private_user", "is_private": true, "bio": "Private life"}'
+        result = _parse_instagram_output(raw, "Private User")
+        assert any("private" in s.lower() for s in result["snippets"])
+
+
 # ── Social Agent Tests ───────────────────────────────────────────────────────
 
 
@@ -404,6 +553,7 @@ class TestOrchestrator:
         assert "linkedin" in orchestrator.agent_names
         assert "twitter" in orchestrator.agent_names
         assert "google" in orchestrator.agent_names
+        assert "instagram" in orchestrator.agent_names
         assert "osint" in orchestrator.agent_names
         assert "darkweb" in orchestrator.agent_names
         assert "social" in orchestrator.agent_names
