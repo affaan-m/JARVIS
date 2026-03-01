@@ -29,10 +29,19 @@ export function useGlassesStream(): UseGlassesStreamReturn {
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState<StreamStatus>("disconnected");
   const [error, setError] = useState<string | null>(null);
 
+  const clearConnectionTimeout = useCallback(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }, []);
+
   const disconnect = useCallback(() => {
+    clearConnectionTimeout();
     wsRef.current?.close();
     wsRef.current = null;
     pcRef.current?.close();
@@ -43,7 +52,7 @@ export function useGlassesStream(): UseGlassesStreamReturn {
     }
     setStatus("disconnected");
     setError(null);
-  }, []);
+  }, [clearConnectionTimeout]);
 
   const connect = useCallback(
     (roomCode: string) => {
@@ -119,16 +128,23 @@ export function useGlassesStream(): UseGlassesStreamReturn {
           }
 
           try {
-            // Fetch TURN credentials
-            console.log("[WebRTC] Fetching TURN credentials...");
-            const turnRes = await fetch(TURN_ENDPOINT);
-            const turnData = await turnRes.json();
-            const turnServers: RTCIceServer[] =
-              turnData.iceServers || [];
-            console.log(
-              "[WebRTC] TURN servers:",
-              turnServers.length
-            );
+            // Fetch TURN credentials with 5s timeout
+            let turnServers: RTCIceServer[] = [];
+            try {
+              console.log("[WebRTC] Fetching TURN credentials...");
+              const turnAbort = new AbortController();
+              const turnTimeout = setTimeout(() => turnAbort.abort(), 5000);
+              const turnRes = await fetch(TURN_ENDPOINT, { signal: turnAbort.signal });
+              clearTimeout(turnTimeout);
+              const turnData = await turnRes.json();
+              turnServers = turnData.iceServers || [];
+              console.log("[WebRTC] TURN response:", JSON.stringify(turnData));
+              if (turnServers.length === 0) {
+                console.warn("[WebRTC] No TURN servers returned — STUN-only mode");
+              }
+            } catch (turnErr) {
+              console.warn("[WebRTC] TURN fetch failed, continuing with STUN only:", turnErr);
+            }
 
             // Combine STUN + TURN
             const iceServers = [...STUN_SERVERS, ...turnServers];
@@ -160,6 +176,7 @@ export function useGlassesStream(): UseGlassesStreamReturn {
               console.log("[WebRTC] ICE state:", state);
 
               if (state === "connected" || state === "completed") {
+                clearConnectionTimeout();
                 console.log("[WebRTC] ICE connected — attaching stream");
                 if (videoRef.current && streamRef.current) {
                   videoRef.current.srcObject = streamRef.current;
@@ -168,12 +185,21 @@ export function useGlassesStream(): UseGlassesStreamReturn {
               }
 
               if (state === "failed") {
-                setError("Connection failed");
+                clearConnectionTimeout();
+                setError("Connection failed — try a different network");
                 setStatus("error");
               }
 
               if (state === "disconnected") {
-                console.log("[WebRTC] ICE disconnected (may recover)");
+                console.log("[WebRTC] ICE disconnected — waiting 5s for recovery");
+                clearConnectionTimeout();
+                timeoutRef.current = setTimeout(() => {
+                  if (pcRef.current?.iceConnectionState === "disconnected") {
+                    console.log("[WebRTC] ICE did not recover after 5s");
+                    setError("Stream disconnected — connection lost");
+                    setStatus("error");
+                  }
+                }, 5000);
               }
             };
 
@@ -208,6 +234,17 @@ export function useGlassesStream(): UseGlassesStreamReturn {
             await pc.setLocalDescription(answer);
             ws.send(JSON.stringify({ type: "answer", sdp: answer.sdp }));
             console.log("[WebRTC] Answer sent");
+
+            // 20s timeout — if ICE doesn't connect, show error
+            clearConnectionTimeout();
+            timeoutRef.current = setTimeout(() => {
+              const iceState = pcRef.current?.iceConnectionState;
+              if (iceState && iceState !== "connected" && iceState !== "completed") {
+                console.log("[WebRTC] Connection timed out, ICE state:", iceState);
+                setError("Connection timed out — camera may be behind a firewall");
+                setStatus("error");
+              }
+            }, 20000);
           } catch (err) {
             console.error("[WebRTC] Error handling offer:", err);
             setError(
@@ -246,6 +283,17 @@ export function useGlassesStream(): UseGlassesStreamReturn {
           "reason:",
           e.reason
         );
+        const iceState = pcRef.current?.iceConnectionState;
+        if (iceState === "connected" || iceState === "completed") {
+          // Media flows P2P — signaling loss is fine
+          console.log("[WebRTC] Signaling lost but media flows P2P, continuing");
+        } else {
+          // Signaling was needed for handshake — fatal
+          console.log("[WebRTC] Signaling lost during handshake, ICE state:", iceState);
+          clearConnectionTimeout();
+          setError("Signaling connection lost");
+          setStatus("error");
+        }
       };
     },
     [disconnect]
@@ -254,10 +302,11 @@ export function useGlassesStream(): UseGlassesStreamReturn {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      clearConnectionTimeout();
       wsRef.current?.close();
       pcRef.current?.close();
     };
-  }, []);
+  }, [clearConnectionTimeout]);
 
   return { videoRef, status, connect, disconnect, error };
 }
