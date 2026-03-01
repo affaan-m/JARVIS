@@ -96,12 +96,13 @@ export function Corkboard({ persons, connections, onPersonClick, selectedPersonI
         </svg>
 
         {/* Person cards */}
-        {persons.map((person) => (
+        {persons.map((person, index) => (
           <PersonCard
             key={person._id}
             person={person}
             isSelected={selectedPersonId === person._id}
             onClick={() => onPersonClick(person._id)}
+            index={index}
           />
         ))}
       </div>
