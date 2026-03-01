@@ -130,13 +130,6 @@ export function Sidebar({ people, activePerson, onSelect, search, setSearch }: S
           })}
         </div>
 
-        {/* Footer */}
-        <div style={{
-          paddingTop: 12, borderTop: "1px solid rgba(255,255,255,.04)",
-          color: "#1e2a3a", fontSize: 9, letterSpacing: ".1em", textAlign: "center", fontWeight: 600,
-        }}>
-          THREADPULL • v0.1
-        </div>
       </div>
     </div>
   );

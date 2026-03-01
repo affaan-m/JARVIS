@@ -4,12 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { demoPeople } from "@/lib/demo-data";
 import type { IntelPerson, IntelSource } from "@/lib/types";
+import { useFrameCapture } from "@/lib/useFrameCapture";
+import { useGlassesStream } from "@/lib/useGlassesStream";
 import { CameraFeed } from "./CameraFeed";
 import { Sidebar } from "./Sidebar";
+import { StatusBar } from "./StatusBar";
+import { TopBar } from "./TopBar";
 
 /*
  * ============================================================
- * INTELLIGENCE CORKBOARD — v5
+ * INTELLIGENCE CORKBOARD — v6
  * ============================================================
  *
  * DATA INTEGRATION NOTES (for real implementation):
@@ -32,7 +36,7 @@ import { Sidebar } from "./Sidebar";
  *      b) It will appear on the board with shimmer loading state
  *      c) When content is ready, set loading=false
  *
- * 3. SUMMARY DOCUMENT (blue center doc):
+ * 3. SUMMARY DOCUMENT (center doc):
  *    - Generated/updated as sources come in
  *    - person.summary = { nm: "PERSON NAME", sm: "summary text" }
  *    - Appears on first source, updates as more arrive
@@ -55,7 +59,7 @@ import { Sidebar } from "./Sidebar";
  * ============================================================
  */
 
-const BW = 860, BH = 680, GW = 168, GH = 108, BDW = 210, BDH = 150, FR = 14, SIDE_W = 270;
+const BW = 860, BH = 680, GW = 168, GH = 108, BDW = 220, BDH = 200, FR = 0, SIDE_W = 270;
 const ZM = [0.48, 1, 1.65];
 const CAM_W = 240, CAM_H = 150, CAM_PAD = 16;
 const CAM_ZONE = { x: BW - CAM_W - CAM_PAD - 10, y: CAM_PAD - 10, w: CAM_W + 30, h: CAM_H + 30 };
@@ -239,14 +243,23 @@ export default function IntelBoard() {
   const [modalVis, setModalVis] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [vsc, setVsc] = useState(1);
-  const [camConnected] = useState(false);
+  const {
+    videoRef, status: camStatus, connect: camConnect, disconnect: camDisconnect, error: camError,
+  } = useGlassesStream();
+  const [detectionCount, setDetectionCount] = useState<number | undefined>(undefined);
+  useFrameCapture({
+    videoRef,
+    enabled: camStatus === "live",
+    onCapture: (res) => setDetectionCount(res.detections.length),
+  });
   const drag = useRef({ sx: 0, sy: 0, dx: 0, dy: 0, moved: false, id: null as string | null });
   const vscRef = useRef(1);
 
+  // TopBar height (h-12 = 48px) + StatusBar height (h-8 = 32px) = 80px
   useEffect(() => {
     const fn = () => {
       const availW = window.innerWidth - SIDE_W - 40;
-      const s = Math.min(availW / (BW + FR * 2), (window.innerHeight - 60) / (BH + FR * 2), 1);
+      const s = Math.min(availW / BW, (window.innerHeight - 80) / BH, 1);
       vscRef.current = s; setVsc(s);
     };
     fn(); window.addEventListener("resize", fn); return () => window.removeEventListener("resize", fn);
@@ -290,11 +303,6 @@ export default function IntelBoard() {
    * SELECT PERSON — Crossfade transition
    * 1. Fade out current board (boardFade -> false)
    * 2. After fade-out, swap data and fade in (boardFade -> true)
-   *
-   * In real implementation:
-   * - Load person's sources from memory/storage layer
-   * - If person has no cached board positions, generate them
-   * - If person is "scanning", show sources as they arrive
    */
   const selectPerson = useCallback((p: IntelPerson) => {
     if (activePerson?.id === p.id) return;
@@ -304,7 +312,6 @@ export default function IntelBoard() {
       const data = buildBoardData(p);
       setBoardData(data);
       setBoardFade(true);
-      // Trigger appear animation for each source
       setTimeout(() => {
         setBoardData(prev => ({ ...prev, srcs: prev.srcs.map(s => ({ ...s, appeared: true })) }));
       }, 50);
@@ -346,8 +353,8 @@ export default function IntelBoard() {
   return (
     <div style={{
       width: "100vw", height: "100vh", overflow: "hidden", position: "relative",
-      fontFamily: "'Inter',system-ui,sans-serif", display: "flex",
-      background: "linear-gradient(180deg,#070b14 0%,#0a0f1c 25%,#0d1224 50%,#0f1628 75%,#111828 100%)",
+      fontFamily: "'Inter',system-ui,sans-serif", display: "flex", flexDirection: "column",
+      background: "var(--bg-dark)",
     }}>
       <style>{`
         @keyframes sh{0%{background-position:-150px 0}100%{background-position:150px 0}}
@@ -356,249 +363,242 @@ export default function IntelBoard() {
         @keyframes pf{0%{transform:translateY(0);opacity:0}15%{opacity:.3}85%{opacity:.3}100%{transform:translateY(-140px);opacity:0}}
         @keyframes mi{0%{opacity:0;transform:scale(.93) translateY(12px)}100%{opacity:1;transform:scale(1) translateY(0)}}
         @keyframes dl{0%{stroke-dashoffset:600}100%{stroke-dashoffset:0}}
-        @keyframes fl{0%,94%,100%{opacity:1}95%{opacity:.6}97%{opacity:1}98%{opacity:.5}}
         @keyframes camPulse{0%,100%{opacity:1;box-shadow:0 0 6px rgba(74,222,128,.6)}50%{opacity:.55;box-shadow:0 0 3px rgba(74,222,128,.3)}}
         @keyframes staticFlicker{0%{background-position:0 0}33%{background-position:50px 30px}66%{background-position:20px 60px}100%{background-position:70px 10px}}
         @keyframes scanPulse{0%,100%{opacity:1}50%{opacity:.4}}
         @keyframes listSlideIn{0%{opacity:0;transform:translateY(-8px)}100%{opacity:1;transform:translateY(0)}}
       `}</style>
 
-      {/* Wall texture */}
-      <div style={{
-        position: "fixed", inset: 0, pointerEvents: "none",
-        backgroundImage: "radial-gradient(circle,rgba(255,255,255,.006) 1px,transparent 1px)", backgroundSize: "20px 20px",
-      }} />
+      {/* TOP BAR */}
+      <TopBar />
 
-      {/* LEFT SIDEBAR */}
-      <Sidebar
-        people={people}
-        activePerson={activePerson}
-        onSelect={selectPerson}
-        search={search}
-        setSearch={setSearch}
-      />
+      {/* MAIN CONTENT ROW */}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
 
-      {/* BOARD AREA */}
-      <div style={{ flex: 1, position: "relative", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+        {/* LEFT SIDEBAR */}
+        <Sidebar
+          people={people}
+          activePerson={activePerson}
+          onSelect={selectPerson}
+          search={search}
+          setSearch={setSearch}
+        />
 
-        {/* Environment details */}
+        {/* BOARD AREA — fills entire right space with green background */}
         <div style={{
-          position: "absolute", right: 20, top: 0, bottom: 0, width: 3,
-          background: "linear-gradient(180deg,#141c28,#0f1520,#141c28)",
-          borderRight: "1px solid #1e2638", opacity: .3, pointerEvents: "none",
-        }} />
-        <div style={{
-          position: "absolute", bottom: 0, left: 0, right: 0, height: 80, pointerEvents: "none",
-          background: "linear-gradient(180deg,transparent,rgba(3,5,10,.5))",
-        }} />
-
-        {/* CAMERA WRAPPER */}
-        <div style={{
-          width: BW + FR * 2, height: BH + FR * 2, position: "relative",
-          transform: cam, transformOrigin: "center center",
-          transition: tier === 3 ? "transform 0.85s cubic-bezier(.25,.46,.45,.94)" : "transform 1s cubic-bezier(.25,.46,.45,.94)",
+          flex: 1, position: "relative", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+          backgroundColor: "var(--board-bg)",
+          backgroundImage: [
+            "linear-gradient(rgba(120,180,80,.03) 1px, transparent 1px)",
+            "linear-gradient(90deg, rgba(120,180,80,.03) 1px, transparent 1px)",
+          ].join(", "),
+          backgroundSize: "40px 40px, 40px 40px",
         }}>
-
-          {/* Fluorescent light */}
+          {/* Vignette overlay */}
           <div style={{
-            position: "absolute", top: -58, left: "50%", transform: "translateX(-50%)", width: 300, height: 14, zIndex: 30,
-            background: "linear-gradient(180deg,#1a2232,#222d3e)", borderRadius: 3, border: "1px solid #2a3445",
-          }}>
-            <div style={{
-              position: "absolute", bottom: -3, left: 16, right: 16, height: 7,
-              background: "linear-gradient(180deg,#dce4f0,#c8d2e2)", borderRadius: 3, animation: "fl 10s infinite",
-              boxShadow: "0 0 30px rgba(200,215,240,.2),0 0 80px rgba(180,200,230,.1)",
-            }} />
-          </div>
-          <div style={{
-            position: "absolute", top: -40, left: "50%", transform: "translateX(-50%)",
-            width: 500, height: 180, pointerEvents: "none", zIndex: 0,
-            background: "radial-gradient(ellipse at top center,rgba(180,200,230,.04) 0%,transparent 70%)",
+            position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1,
+            background: "radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,.35) 100%)",
           }} />
 
-          {/* BOARD FRAME */}
-          <div style={{
-            position: "absolute", inset: 0, zIndex: 2,
-            background: "linear-gradient(145deg,#1a2235,#141c2a,#1e2840)", borderRadius: 6,
-            border: "1px solid #2a3448",
-            boxShadow: "inset 0 1px 0 rgba(255,255,255,.04),0 10px 50px rgba(0,0,0,.6),0 2px 8px rgba(0,0,0,.3)",
-          }}>
-            {[{ top: 9, left: 9 }, { top: 9, right: 9 }, { bottom: 9, right: 9 }, { bottom: 9, left: 9 }].map((p, i) => (
-              <div key={i} style={{
-                position: "absolute", width: 13, height: 13, borderRadius: "50%", ...p,
-                background: "radial-gradient(circle at 40% 35%,#6a7080,#3a4250,#2a3040)",
-                border: "1px solid #4a5260", zIndex: 3,
-                boxShadow: "inset 0 1px 2px rgba(255,255,255,.1),0 1px 3px rgba(0,0,0,.5)",
-              }}>
-                <div style={{
-                  position: "absolute", top: 3, left: 3, width: 2, height: 5,
-                  background: "rgba(255,255,255,.08)", borderRadius: 1, transform: "rotate(-30deg)",
-                }} />
-              </div>
-            ))}
+          {/* CAMERA FEED — fixed top-right of board area */}
+          <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, pointerEvents: "none", zIndex: 20 }}>
+            <CameraFeed
+              videoRef={videoRef}
+              status={camStatus}
+              onConnect={camConnect}
+              onDisconnect={camDisconnect}
+              error={camError}
+              detectionCount={detectionCount}
+            />
           </div>
 
-          {/* BOARD SURFACE */}
+          {/* CAMERA WRAPPER — scaled board canvas */}
           <div style={{
-            position: "absolute", top: FR, left: FR, right: FR, bottom: FR, zIndex: 4,
-            backgroundColor: "#0c1120",
-            backgroundImage: [
-              "linear-gradient(rgba(18,32,65,.06) 1px, transparent 1px)",
-              "linear-gradient(90deg, rgba(18,32,65,.06) 1px, transparent 1px)",
-              "radial-gradient(circle, rgba(5,9,20,.78) 1.2px, transparent 1.2px)",
-              "radial-gradient(circle, rgba(5,9,20,.78) 1.2px, transparent 1.2px)",
-            ].join(", "),
-            backgroundSize: "28px 28px, 28px 28px, 7px 7px, 7px 7px",
-            backgroundPosition: "0 0, 0 0, 3.5px 3.5px, 0 0",
-            borderRadius: 2,
+            width: BW, height: BH, position: "relative", zIndex: 5,
+            transform: cam, transformOrigin: "center center",
+            transition: tier === 3 ? "transform 0.85s cubic-bezier(.25,.46,.45,.94)" : "transform 1s cubic-bezier(.25,.46,.45,.94)",
           }}>
-            {/* Cork grain overlay */}
+            {/* BOARD CONTENT — Crossfade wrapper */}
             <div style={{
-              position: "absolute", inset: 0, borderRadius: 2, pointerEvents: "none", zIndex: 1, opacity: .42,
-              mixBlendMode: "overlay",
-              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='c'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.38' numOctaves='3' seed='7' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23c)'/%3E%3C/svg%3E")`,
-              backgroundSize: "220px 220px",
-            }} />
-            {/* Vignette */}
-            <div style={{
-              position: "absolute", inset: 0, pointerEvents: "none", zIndex: 2, borderRadius: 2,
-              background: "radial-gradient(ellipse at center,transparent 40%,rgba(2,5,14,.65) 100%)",
-            }} />
-            {Array.from({ length: 10 }).map((_, i) => (
-              <div key={i} style={{
-                position: "absolute", left: `${10 + Math.random() * 80}%`, bottom: `${Math.random() * 15}%`,
-                width: 1.5, height: 1.5, borderRadius: "50%", background: "rgba(148,163,184,.2)",
-                animation: `pf ${8 + Math.random() * 8}s linear infinite`, animationDelay: `${Math.random() * 8}s`,
-                pointerEvents: "none", zIndex: 3,
-              }} />
-            ))}
-          </div>
+              position: "absolute", top: 0, left: 0, width: BW, height: BH, zIndex: 10,
+              opacity: boardFade ? 1 : 0, transition: "opacity .4s ease",
+            }}>
+              {/* SVG strings */}
+              <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 8 }}>
+                {blu && srcs.map(s => (
+                  <g key={s.id}>
+                    <path d={catenary(s.x + GW / 2, s.y + 4, bpx, bpy)} fill="none" stroke="rgba(140,20,20,.08)" strokeWidth={5} />
+                    <path d={catenary(s.x + GW / 2, s.y + 4, bpx, bpy)} fill="none" stroke="#c0392b" strokeWidth={1.5} opacity={.6}
+                      strokeDasharray="600" style={{ animation: "dl 1.5s ease-out forwards" }} />
+                  </g>
+                ))}
+              </svg>
 
-          {/* Camera feed */}
-          <CameraFeed connected={camConnected} />
-
-          {/* BOARD CONTENT — Crossfade wrapper */}
-          <div style={{
-            position: "absolute", top: FR, left: FR, width: BW, height: BH, zIndex: 10,
-            opacity: boardFade ? 1 : 0, transition: "opacity .4s ease",
-          }}>
-
-            {/* SVG strings */}
-            <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 8 }}>
-              {blu && srcs.map(s => (
-                <g key={s.id}>
-                  <path d={catenary(s.x + GW / 2, s.y + 4, bpx, bpy)} fill="none" stroke="rgba(140,20,20,.08)" strokeWidth={5} />
-                  <path d={catenary(s.x + GW / 2, s.y + 4, bpx, bpy)} fill="none" stroke="#b91c1c" strokeWidth={1.4} opacity={.55}
-                    strokeDasharray="600" style={{ animation: "dl 1.5s ease-out forwards" }} />
-                </g>
-              ))}
-            </svg>
-
-            {/* BLUE SUMMARY DOC */}
-            {blu && activePerson && (
-              <div
-                onMouseDown={e => startDrag(e, "blue", blu.x, blu.y)}
-                onClick={() => clickDoc({ kind: "summary" })}
-                style={{
-                  position: "absolute", left: blu.x, top: blu.y, width: BDW, height: BDH,
-                  background: PAPERS[1].bg, border: `1px solid ${PAPERS[1].bd}`, borderRadius: 2,
-                  padding: "14px 14px 14px",
-                  cursor: tier === 2 ? (dragId === "blue" ? "grabbing" : "grab") : "pointer",
-                  zIndex: dragId === "blue" ? 32 : 22, animation: "fi .7s ease-out",
-                  transform: dragId === "blue" ? "scale(1.04)" : "scale(1)",
-                  boxShadow: dragId === "blue"
-                    ? "0 16px 45px rgba(0,0,0,.45),0 2px 6px rgba(0,0,0,.2)"
-                    : "0 4px 14px rgba(0,0,0,.35),0 1px 3px rgba(0,0,0,.15)",
-                  transition: "box-shadow .2s,transform .2s",
-                }}
-              >
-                {TEXTURES[1]()}
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, position: "relative", zIndex: 1 }}>
-                  <div style={{
-                    width: 40, height: 40, borderRadius: "50%", flexShrink: 0,
-                    background: "linear-gradient(135deg,#d0d5dd,#b8bfc8)", border: "2px solid #a0a8b4",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                      <circle cx="12" cy="8" r="4" fill="#6b7280" />
-                      <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" fill="#6b7280" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div style={{ color: "#111827", fontSize: 12, fontWeight: 700, letterSpacing: ".04em" }}>{activePerson.summary.nm}</div>
-                    <div style={{ color: "#dc2626", fontSize: 9, fontWeight: 600, letterSpacing: ".06em", marginTop: 1 }}>
-                      {srcs.length} SOURCE{srcs.length !== 1 ? "S" : ""} FOUND
-                    </div>
-                  </div>
-                </div>
-                <div style={{
-                  color: "#4b5563", fontSize: 9, lineHeight: 1.45, overflow: "hidden", position: "relative", zIndex: 1,
-                  textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-                }}>
-                  {activePerson.summary.sm}
-                </div>
-              </div>
-            )}
-
-            {/* SOURCE DOCS */}
-            {srcs.map(s => {
-              const p = PAPERS[s.pi], isD = dragId === s.id;
-              return (
+              {/* SUMMARY DOC — PersonCard-style */}
+              {blu && activePerson && (
                 <div
-                  key={s.id}
-                  onMouseDown={e => !s.loading && startDrag(e, s.id, s.x, s.y)}
-                  onClick={() => !s.loading && clickDoc({ kind: "source", id: s.id, nm: s.nm, tp: s.tp, sn: s.sn })}
+                  onMouseDown={e => startDrag(e, "blue", blu.x, blu.y)}
+                  onClick={() => clickDoc({ kind: "summary" })}
                   style={{
-                    position: "absolute", left: s.x, top: s.y, width: GW, height: GH,
-                    background: p.bg, border: `1px solid ${p.bd}`, borderRadius: 2,
-                    padding: "14px 11px 10px",
-                    cursor: s.loading ? "default" : tier === 2 ? (isD ? "grabbing" : "grab") : "pointer",
-                    zIndex: isD ? 32 : 14,
-                    opacity: s.appeared ? 1 : 0,
-                    transform: `rotate(${s.appeared ? s.rot : 0}deg) scale(${isD ? 1.06 : s.appeared ? 1 : 0.8})`,
-                    boxShadow: isD
-                      ? "0 18px 45px rgba(0,0,0,.45),0 2px 6px rgba(0,0,0,.2)"
-                      : "0 3px 10px rgba(0,0,0,.3),0 1px 2px rgba(0,0,0,.12)",
-                    transition: "box-shadow .2s,transform .8s ease-out,opacity .8s ease-out",
+                    position: "absolute", left: blu.x, top: blu.y, width: BDW, height: BDH,
+                    background: PAPERS[1].bg, border: `1px solid ${PAPERS[1].bd}`, borderRadius: 3,
+                    padding: "10px 12px 12px",
+                    cursor: tier === 2 ? (dragId === "blue" ? "grabbing" : "grab") : "pointer",
+                    zIndex: dragId === "blue" ? 32 : 22, animation: "fi .7s ease-out",
+                    transform: dragId === "blue" ? "scale(1.04)" : "scale(1)",
+                    boxShadow: dragId === "blue"
+                      ? "0 16px 45px rgba(0,0,0,.45),0 2px 6px rgba(0,0,0,.2)"
+                      : "0 4px 14px rgba(0,0,0,.35),0 1px 3px rgba(0,0,0,.15)",
+                    transition: "box-shadow .2s,transform .2s",
                   }}
                 >
-                  {TEXTURES[s.ti]()}
-                  <CurlOverlay curl={s.curl} />
-                  {s.loading ? <Shimmer pi={s.pi} /> : (
-                    <div style={{ position: "relative", zIndex: 1 }}>
-                      <div style={{ marginBottom: 5 }}>
-                        <span style={{
-                          color: "#065f46", fontSize: 7, fontWeight: 700, letterSpacing: ".1em",
-                          background: "rgba(5,150,105,.06)", padding: "2px 5px", borderRadius: 2,
-                          border: "1px solid rgba(5,150,105,.12)",
-                        }}>{s.tp}</span>
-                      </div>
-                      <div style={{ color: "#111827", fontSize: 10.5, fontWeight: 650, marginBottom: 4 }}>{s.nm}</div>
-                      <div style={{
-                        color: "#4b5563", fontSize: 8.5, lineHeight: 1.4, overflow: "hidden",
-                        textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-                      }}>{s.sn}</div>
+                  {TEXTURES[1]()}
+
+                  {/* Gold pushpin */}
+                  <div style={{
+                    position: "absolute", top: -8, left: "50%", transform: "translateX(-50%)",
+                    width: 16, height: 16, borderRadius: "50%",
+                    background: "radial-gradient(circle at 40% 35%, #e8c040, #d4a017, #b8860b)",
+                    border: "2px solid #8a6000",
+                    boxShadow: "0 2px 5px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.2)",
+                    zIndex: 10,
+                  }} />
+
+                  {/* Status badge */}
+                  <div style={{
+                    position: "absolute", top: 8, right: 8,
+                    fontSize: 8, padding: "2px 5px", borderRadius: 2,
+                    background: "#3498db", color: "#fff",
+                    fontFamily: "var(--font-mono)", fontWeight: 700, letterSpacing: ".08em",
+                    zIndex: 5,
+                  }}>
+                    {srcs.length} SOURCE{srcs.length !== 1 ? "S" : ""}
+                  </div>
+
+                  {/* Profile photo area */}
+                  <div style={{
+                    width: 56, height: 70, margin: "10px auto 8px",
+                    background: "linear-gradient(135deg,#d8dde5,#c4cad4)",
+                    border: "2px solid #a8adb8",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    position: "relative", zIndex: 1,
+                  }}>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="8" r="4" fill="#8090a0" />
+                      <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" fill="#8090a0" />
+                    </svg>
+                  </div>
+
+                  {/* Name in Bebas Neue */}
+                  <div style={{
+                    textAlign: "center", fontFamily: "var(--font-heading)", fontSize: 18,
+                    letterSpacing: 2, color: "#1a1a2e", position: "relative", zIndex: 1,
+                    lineHeight: 1.1, marginBottom: 4,
+                  }}>
+                    {activePerson.summary.nm.toUpperCase()}
+                  </div>
+
+                  {/* Job / Location metadata */}
+                  {(activePerson.summary.title || activePerson.summary.location) && (
+                    <div style={{ position: "relative", zIndex: 1, marginBottom: 5 }}>
+                      {activePerson.summary.title && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "center", marginBottom: 2 }}>
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#6b7a58" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/>
+                          </svg>
+                          <span style={{ color: "#5a6a48", fontSize: 8, fontFamily: "var(--font-mono)" }}>
+                            {activePerson.summary.title}
+                          </span>
+                        </div>
+                      )}
+                      {activePerson.summary.location && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "center" }}>
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#6b7a58" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
+                          </svg>
+                          <span style={{ color: "#5a6a48", fontSize: 8, fontFamily: "var(--font-mono)" }}>
+                            {activePerson.summary.location}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
 
-        {/* BACK BUTTON */}
-        {tier === 3 && (
-          <button onClick={backFromDoc} style={{
-            position: "fixed", top: 20, left: SIDE_W + 20, zIndex: 60,
-            padding: "8px 18px", background: "rgba(255,255,255,.06)",
-            border: "1px solid rgba(255,255,255,.1)", borderRadius: 6,
-            color: "#94a3b8", fontSize: 12, fontWeight: 600, cursor: "pointer",
-            backdropFilter: "blur(8px)", display: "flex", alignItems: "center", gap: 6,
-          }}>
-            <span style={{ fontSize: 14 }}>←</span> Back
-          </button>
-        )}
+                  {/* Summary snippet */}
+                  <div style={{
+                    color: "#4b5563", fontSize: 8.5, lineHeight: 1.45,
+                    overflow: "hidden", position: "relative", zIndex: 1,
+                    display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical",
+                    textAlign: "center",
+                  }}>
+                    {activePerson.summary.sm}
+                  </div>
+                </div>
+              )}
+
+              {/* SOURCE DOCS */}
+              {srcs.map(s => {
+                const p = PAPERS[s.pi], isD = dragId === s.id;
+                return (
+                  <div
+                    key={s.id}
+                    onMouseDown={e => !s.loading && startDrag(e, s.id, s.x, s.y)}
+                    onClick={() => !s.loading && clickDoc({ kind: "source", id: s.id, nm: s.nm, tp: s.tp, sn: s.sn })}
+                    style={{
+                      position: "absolute", left: s.x, top: s.y, width: GW, height: GH,
+                      background: p.bg, border: `1px solid ${p.bd}`, borderRadius: 2,
+                      padding: "14px 11px 10px",
+                      cursor: s.loading ? "default" : tier === 2 ? (isD ? "grabbing" : "grab") : "pointer",
+                      zIndex: isD ? 32 : 14,
+                      opacity: s.appeared ? 1 : 0,
+                      transform: `rotate(${s.appeared ? s.rot : 0}deg) scale(${isD ? 1.06 : s.appeared ? 1 : 0.8})`,
+                      boxShadow: isD
+                        ? "0 18px 45px rgba(0,0,0,.45),0 2px 6px rgba(0,0,0,.2)"
+                        : "0 3px 10px rgba(0,0,0,.3),0 1px 2px rgba(0,0,0,.12)",
+                      transition: "box-shadow .2s,transform .8s ease-out,opacity .8s ease-out",
+                    }}
+                  >
+                    {TEXTURES[s.ti]()}
+                    <CurlOverlay curl={s.curl} />
+                    {s.loading ? <Shimmer pi={s.pi} /> : (
+                      <div style={{ position: "relative", zIndex: 1 }}>
+                        <div style={{ marginBottom: 5 }}>
+                          <span style={{
+                            color: "#065f46", fontSize: 7, fontWeight: 700, letterSpacing: ".1em",
+                            background: "rgba(5,150,105,.06)", padding: "2px 5px", borderRadius: 2,
+                            border: "1px solid rgba(5,150,105,.12)",
+                          }}>{s.tp}</span>
+                        </div>
+                        <div style={{ color: "#111827", fontSize: 10.5, fontWeight: 650, marginBottom: 4 }}>{s.nm}</div>
+                        <div style={{
+                          color: "#4b5563", fontSize: 8.5, lineHeight: 1.4, overflow: "hidden",
+                          textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                        }}>{s.sn}</div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* BACK BUTTON */}
+          {tier === 3 && (
+            <button onClick={backFromDoc} style={{
+              position: "absolute", top: 16, left: 16, zIndex: 60,
+              padding: "8px 18px", background: "rgba(255,255,255,.06)",
+              border: "1px solid rgba(255,255,255,.1)", borderRadius: 6,
+              color: "#94a3b8", fontSize: 12, fontWeight: 600, cursor: "pointer",
+              backdropFilter: "blur(8px)", display: "flex", alignItems: "center", gap: 6,
+            }}>
+              <span style={{ fontSize: 14 }}>←</span> Back
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* BOTTOM STATUS BAR */}
+      <StatusBar people={people} activePerson={activePerson} />
 
       {/* INTELLIGENCE MODAL */}
       {modalVis && selDoc && (
