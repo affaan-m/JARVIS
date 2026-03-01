@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPECTER — Live Feed</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: #e0e0e0;
+  }
+  h1 {
+    font-size: 1.1rem;
+    color: #00ff88;
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+  }
+  img {
+    max-width: 95vw;
+    max-height: 85vh;
+    border-radius: 8px;
+    border: 1px solid #222;
+  }
+  .hint {
+    margin-top: 10px;
+    font-size: 0.75rem;
+    color: #555;
+  }
+</style>
+</head>
+<body>
+  <h1>SPECTER LIVE</h1>
+  <img src="/stream" alt="Live annotated feed">
+  <p class="hint">Real-time YOLO person detection stream</p>
+</body>
+</html>

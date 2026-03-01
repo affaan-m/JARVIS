@@ -1,0 +1,34 @@
+FROM python:3.11-slim
+
+# System deps for OpenCV
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install CPU-only PyTorch first
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# Install everything else
+COPY requirements_stream.txt .
+RUN pip install --no-cache-dir -r requirements_stream.txt
+
+# Copy application code + static assets
+COPY stream_processor.py .
+COPY export_onnx.py .
+COPY static/ ./static/
+COPY yolo11n.pt .
+
+# Export ONNX at build time (320px input)
+RUN python export_onnx.py
+
+ENV OMP_NUM_THREADS=4
+ENV OPENBLAS_NUM_THREADS=4
+ENV MKL_NUM_THREADS=4
+
+EXPOSE 8765
+
+CMD ["uvicorn", "stream_processor:app", "--host", "0.0.0.0", "--port", "8765"]

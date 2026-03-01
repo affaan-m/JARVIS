@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPECTER — Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    color: #e0e0e0;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  h1 {
+    font-size: 1.4rem;
+    color: #00ff88;
+    margin-bottom: 16px;
+    letter-spacing: 2px;
+  }
+  .controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  input {
+    background: #1a1a2e;
+    border: 1px solid #333;
+    color: #e0e0e0;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    width: 200px;
+  }
+  input:focus { outline: none; border-color: #00ff88; }
+  button {
+    background: #00ff88;
+    color: #0a0a0a;
+    border: none;
+    padding: 8px 20px;
+    border-radius: 6px;
+    font-family: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  button:hover { background: #00cc6a; }
+  button:disabled { background: #333; color: #666; cursor: not-allowed; }
+  button.disconnect { background: #ff4444; color: white; }
+  .video-container {
+    position: relative;
+    max-width: 720px;
+    width: 100%;
+  }
+  #annotatedView {
+    width: 100%;
+    background: #111;
+    border-radius: 8px;
+    border: 1px solid #222;
+  }
+  canvas { display: none; }
+  video { display: none; }
+  .hud {
+    display: flex;
+    gap: 20px;
+    margin-top: 10px;
+    font-size: 0.8rem;
+    color: #888;
+  }
+  .hud span { color: #00ff88; }
+  #status {
+    margin-bottom: 10px;
+    font-size: 0.85rem;
+    padding: 6px 14px;
+    border-radius: 20px;
+    background: #1a1a2e;
+  }
+  #status.connected { color: #00ff88; border: 1px solid #00ff8844; }
+  #status.connecting { color: #ffaa00; border: 1px solid #ffaa0044; }
+  #status.error { color: #ff4444; border: 1px solid #ff444444; }
+  .source-toggle {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .source-toggle button {
+    background: #1a1a2e;
+    color: #888;
+    border: 1px solid #333;
+    font-weight: 500;
+  }
+  .source-toggle button.active {
+    background: #00ff88;
+    color: #0a0a0a;
+    border-color: #00ff88;
+  }
+</style>
+</head>
+<body>
+
+<h1>SPECTER VIEWER</h1>
+
+<div class="source-toggle">
+  <button id="btnGlasses" class="active" onclick="setSource('glasses')">Glasses (WebRTC)</button>
+  <button id="btnWebcam" onclick="setSource('webcam')">Webcam</button>
+</div>
+
+<div id="status" class="connecting">Disconnected</div>
+
+<!-- Glasses mode controls -->
+<div class="controls" id="glassesControls">
+  <input type="text" id="roomCode" placeholder="Room code" autocomplete="off">
+  <button id="btnConnect" onclick="connectGlasses()">Connect</button>
+</div>
+
+<!-- Webcam mode controls -->
+<div class="controls" id="webcamControls" style="display:none;">
+  <button id="btnStartCam" onclick="startWebcam()">Start Webcam</button>
+  <button id="btnStopCam" class="disconnect" onclick="stopWebcam()" style="display:none;">Stop</button>
+</div>
+
+<div class="video-container">
+  <img id="annotatedView" alt="Annotated feed">
+</div>
+
+<div class="hud">
+  <div>Process: <span id="hudMs">—</span> ms</div>
+  <div>People: <span id="hudPeople">0</span></div>
+  <div>FPS: <span id="hudFps">—</span></div>
+</div>
+
+<!-- Hidden elements for video capture -->
+<video id="remoteVideo" autoplay playsinline muted></video>
+<video id="webcamVideo" autoplay playsinline muted></video>
+<canvas id="captureCanvas"></canvas>
+
+<script>
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+const SIGNAL_HOST = 'visionclaw-signal.fly.dev';
+const SIGNAL_PASSWORD = 'VCLAW1';
+// Use URL-embedded creds for WebSocket (browser sends Basic auth on upgrade)
+const SIGNAL_URL = `wss://:${SIGNAL_PASSWORD}@${SIGNAL_HOST}`;
+const TURN_URL = `https://${SIGNAL_HOST}/api/turn`;
+const CAPTURE_FPS = 10;
+
+let source = 'glasses';     // 'glasses' | 'webcam'
+let ws = null;               // WebSocket to /ws/process
+let sigWs = null;            // WebSocket to VisionClaw signaling
+let pc = null;               // RTCPeerConnection
+let captureInterval = null;
+let webcamStream = null;
+let fpsFrames = 0;
+let fpsLast = performance.now();
+
+const roomInput     = document.getElementById('roomCode');
+const btnConnect    = document.getElementById('btnConnect');
+const annotatedView = document.getElementById('annotatedView');
+const remoteVideo   = document.getElementById('remoteVideo');
+const webcamVideo   = document.getElementById('webcamVideo');
+const canvas        = document.getElementById('captureCanvas');
+const ctx           = canvas.getContext('2d');
+const statusEl      = document.getElementById('status');
+const hudMs         = document.getElementById('hudMs');
+const hudPeople     = document.getElementById('hudPeople');
+const hudFps        = document.getElementById('hudFps');
+
+// ---------------------------------------------------------------------------
+// Source toggle
+// ---------------------------------------------------------------------------
+function setSource(s) {
+  source = s;
+  document.getElementById('btnGlasses').classList.toggle('active', s === 'glasses');
+  document.getElementById('btnWebcam').classList.toggle('active', s === 'webcam');
+  document.getElementById('glassesControls').style.display = s === 'glasses' ? 'flex' : 'none';
+  document.getElementById('webcamControls').style.display = s === 'webcam' ? 'flex' : 'none';
+  // Cleanup the other source
+  if (s === 'glasses') stopWebcam();
+  if (s === 'webcam') disconnectGlasses();
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket to server /ws/process
+// ---------------------------------------------------------------------------
+function ensureWS() {
+  if (ws && ws.readyState === WebSocket.OPEN) return Promise.resolve(ws);
+  return new Promise((resolve, reject) => {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/ws/process`);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      console.log('[WS] Connected to /ws/process');
+      resolve(ws);
+    };
+    ws.onerror = (e) => {
+      console.error('[WS] Error', e);
+      reject(e);
+    };
+    ws.onclose = () => {
+      console.log('[WS] Disconnected');
+      ws = null;
+    };
+    ws.onmessage = (evt) => {
+      // Binary: 4 bytes float process_ms + 4 bytes uint32 detections + JPEG
+      const buf = evt.data;
+      const view = new DataView(buf);
+      const processMs = view.getFloat32(0, true);
+      const detections = view.getUint32(4, true);
+
+      const jpegBlob = new Blob([buf.slice(8)], { type: 'image/jpeg' });
+      const url = URL.createObjectURL(jpegBlob);
+      const oldSrc = annotatedView.src;
+      annotatedView.src = url;
+      if (oldSrc && oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc);
+
+      hudMs.textContent = processMs.toFixed(0);
+      hudPeople.textContent = detections;
+
+      // FPS counter
+      fpsFrames++;
+      const now = performance.now();
+      if (now - fpsLast >= 1000) {
+        hudFps.textContent = (fpsFrames / ((now - fpsLast) / 1000)).toFixed(1);
+        fpsFrames = 0;
+        fpsLast = now;
+      }
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Frame capture: grab video frame -> JPEG -> send over WS
+// ---------------------------------------------------------------------------
+function startCapture(videoEl) {
+  stopCapture();
+  captureInterval = setInterval(async () => {
+    if (!videoEl.videoWidth || !videoEl.videoHeight) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    canvas.width = videoEl.videoWidth;
+    canvas.height = videoEl.videoHeight;
+    ctx.drawImage(videoEl, 0, 0);
+    canvas.toBlob((blob) => {
+      if (blob && ws && ws.readyState === WebSocket.OPEN) {
+        blob.arrayBuffer().then(buf => ws.send(buf));
+      }
+    }, 'image/jpeg', 0.7);
+  }, 1000 / CAPTURE_FPS);
+}
+
+function stopCapture() {
+  if (captureInterval) {
+    clearInterval(captureInterval);
+    captureInterval = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Glasses mode: VisionClaw WebRTC signaling
+//
+// Protocol (viewer = us = ANSWERER):
+//   Client->Server: {type:'join', room:'ABCDEF'}
+//   Server->Client: {type:'room_joined'}
+//   Server->Client: {type:'peer_joined'}   — glasses connected
+//   Server->Client: {type:'offer', sdp:'...'} — glasses send offer
+//   Client->Server: {type:'answer', sdp:'...'} — we send answer
+//   Client->Server: {type:'candidate', candidate:'...', sdpMid:'...', sdpMLineIndex:N}
+//   Server->Client: {type:'candidate', candidate:'...', sdpMid:'...', sdpMLineIndex:N}
+//   Server->Client: {type:'peer_left'}
+//   Server->Client: {type:'error', message:'...'}
+// ---------------------------------------------------------------------------
+async function connectGlasses() {
+  const room = roomInput.value.trim();
+  if (!room) { alert('Enter a room code'); return; }
+
+  btnConnect.disabled = true;
+  setStatus('connecting', 'Connecting to glasses...');
+
+  try {
+    // 1. Get TURN credentials (with Basic Auth)
+    let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+    try {
+      const turnResp = await fetch(TURN_URL, {
+        headers: { 'Authorization': 'Basic ' + btoa(':' + SIGNAL_PASSWORD) }
+      });
+      if (turnResp.ok) {
+        const turnData = await turnResp.json();
+        if (turnData.iceServers) iceServers = turnData.iceServers;
+      }
+    } catch (e) {
+      console.warn('[TURN] Failed to fetch, using STUN only:', e);
+    }
+
+    // 2. Connect to detection processing WS
+    await ensureWS();
+
+    // 3. Create peer connection FIRST (before signaling connects)
+    pc = new RTCPeerConnection({ iceServers });
+
+    // Add recvonly video transceiver so PC is ready to accept offers
+    pc.addTransceiver('video', { direction: 'recvonly' });
+
+    pc.ontrack = (evt) => {
+      console.log('[WebRTC] Got remote track:', evt.track.kind);
+      if (evt.track.kind === 'video') {
+        remoteVideo.srcObject = evt.streams[0];
+        remoteVideo.play().catch(() => {});
+        startCapture(remoteVideo);
+        setStatus('connected', 'Glasses connected — streaming');
+        btnConnect.textContent = 'Disconnect';
+        btnConnect.classList.add('disconnect');
+        btnConnect.disabled = false;
+        btnConnect.onclick = disconnectGlasses;
+      }
+    };
+
+    pc.onicecandidate = (evt) => {
+      if (evt.candidate && sigWs && sigWs.readyState === WebSocket.OPEN) {
+        sigWs.send(JSON.stringify({
+          type: 'candidate',
+          candidate: evt.candidate.candidate,
+          sdpMid: evt.candidate.sdpMid,
+          sdpMLineIndex: evt.candidate.sdpMLineIndex,
+        }));
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log('[WebRTC] ICE state:', pc.iceConnectionState);
+      if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+        setStatus('error', 'WebRTC disconnected');
+      }
+    };
+
+    // 4. Connect signaling WebSocket (with URL-embedded Basic auth)
+    sigWs = new WebSocket(SIGNAL_URL);
+
+    sigWs.onopen = () => {
+      console.log('[Signal] Connected');
+      sigWs.send(JSON.stringify({ type: 'join', room }));
+    };
+
+    // 5. Handle signaling messages
+    sigWs.onmessage = async (evt) => {
+      const msg = JSON.parse(evt.data);
+      console.log('[Signal] Received:', msg.type);
+
+      switch (msg.type) {
+        case 'room_joined':
+          // We successfully joined the room, wait for glasses
+          console.log('[Signal] Joined room, waiting for glasses...');
+          setStatus('connecting', 'In room — waiting for glasses...');
+          break;
+
+        case 'peer_joined':
+          // Glasses (creator) connected — they will send us an offer
+          console.log('[Signal] Glasses connected, waiting for offer...');
+          setStatus('connecting', 'Glasses connected — negotiating...');
+          break;
+
+        case 'offer':
+          // Glasses sent us an offer — set remote desc and create answer
+          console.log('[Signal] Received offer, creating answer...');
+          await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          sigWs.send(JSON.stringify({ type: 'answer', sdp: answer.sdp }));
+          break;
+
+        case 'candidate':
+          // ICE candidate from glasses — reconstruct and add
+          if (msg.candidate) {
+            await pc.addIceCandidate(new RTCIceCandidate({
+              candidate: msg.candidate,
+              sdpMid: msg.sdpMid,
+              sdpMLineIndex: msg.sdpMLineIndex,
+            }));
+          }
+          break;
+
+        case 'peer_left':
+          console.log('[Signal] Glasses disconnected');
+          setStatus('error', 'Glasses disconnected');
+          break;
+
+        case 'error':
+          console.error('[Signal] Server error:', msg.message);
+          setStatus('error', 'Signal error: ' + msg.message);
+          break;
+
+        default:
+          console.log('[Signal] Unknown message type:', msg.type, msg);
+      }
+    };
+
+    sigWs.onerror = (e) => {
+      console.error('[Signal] Error:', e);
+      setStatus('error', 'Signaling error');
+    };
+    sigWs.onclose = () => {
+      console.log('[Signal] Disconnected');
+    };
+
+  } catch (err) {
+    console.error('[Connect]', err);
+    setStatus('error', 'Connection failed: ' + err.message);
+    btnConnect.disabled = false;
+  }
+}
+
+function disconnectGlasses() {
+  stopCapture();
+  if (pc) { pc.close(); pc = null; }
+  if (sigWs) {
+    // Null out onclose before closing to prevent reconnect loops
+    sigWs.onclose = null;
+    sigWs.close();
+    sigWs = null;
+  }
+  remoteVideo.srcObject = null;
+  btnConnect.textContent = 'Connect';
+  btnConnect.classList.remove('disconnect');
+  btnConnect.disabled = false;
+  btnConnect.onclick = connectGlasses;
+  setStatus('connecting', 'Disconnected');
+}
+
+// ---------------------------------------------------------------------------
+// Webcam mode
+// ---------------------------------------------------------------------------
+async function startWebcam() {
+  try {
+    setStatus('connecting', 'Starting webcam...');
+    webcamStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
+    });
+    webcamVideo.srcObject = webcamStream;
+    await webcamVideo.play();
+
+    await ensureWS();
+    startCapture(webcamVideo);
+
+    setStatus('connected', 'Webcam active');
+    document.getElementById('btnStartCam').style.display = 'none';
+    document.getElementById('btnStopCam').style.display = 'inline-block';
+  } catch (err) {
+    console.error('[Webcam]', err);
+    setStatus('error', 'Webcam error: ' + err.message);
+  }
+}
+
+function stopWebcam() {
+  stopCapture();
+  if (webcamStream) {
+    webcamStream.getTracks().forEach(t => t.stop());
+    webcamStream = null;
+  }
+  webcamVideo.srcObject = null;
+  document.getElementById('btnStartCam').style.display = 'inline-block';
+  document.getElementById('btnStopCam').style.display = 'none';
+  setStatus('connecting', 'Webcam stopped');
+}
+
+// ---------------------------------------------------------------------------
+// Status helper
+// ---------------------------------------------------------------------------
+function setStatus(cls, text) {
+  statusEl.className = cls;
+  statusEl.textContent = text;
+}
+</script>
+</body>
+</html>

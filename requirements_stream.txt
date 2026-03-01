@@ -1,0 +1,7 @@
+fastapi>=0.116.0
+uvicorn[standard]>=0.35.0
+ultralytics>=8.3.0
+opencv-python-headless>=4.10.0
+numpy>=2.0.0
+onnxruntime>=1.19.0
+websockets>=14.0
