@@ -72,16 +72,6 @@ export function TopBar({ personCount, isLive = false, children }: TopBarProps) {
         >
           CIRI
         </span>
-        <span
-          className="text-xs px-2 py-0.5 rounded"
-          style={{
-            background: "var(--stamp-red)",
-            color: "#fff",
-            fontFamily: "var(--font-mono)",
-          }}
-        >
-          CLASSIFIED
-        </span>
       </div>
 
       {/* Center status */}
