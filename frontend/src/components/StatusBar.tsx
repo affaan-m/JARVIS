@@ -27,7 +27,7 @@ export function StatusBar({ people, activePerson }: StatusBarProps) {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const snakeRef = useRef<{ pts: { x: number; y: number }[]; vx: number; vy: number }>({
-    pts: [], vx: 1.8, vy: 0.6,
+    pts: [], vx: 0.7, vy: 0.25,
   });
 
   useEffect(() => {
@@ -88,8 +88,8 @@ export function StatusBar({ people, activePerson }: StatusBarProps) {
       const head = snake.pts[0];
       let nx = head.x + snake.vx;
       let ny = head.y + snake.vy;
-      if (nx <= 2 || nx >= W - 2) { snake.vx *= -1; nx = Math.max(2, Math.min(W - 2, nx)); }
-      if (ny <= 2 || ny >= H - 2) { snake.vy *= -1; ny = Math.max(2, Math.min(H - 2, ny)); }
+      if (nx <= 0 || nx >= W) { snake.vx *= -1; nx = Math.max(0, Math.min(W, nx)); }
+      if (ny <= 0 || ny >= H) { snake.vy *= -1; ny = Math.max(0, Math.min(H, ny)); }
       snake.pts.unshift({ x: nx, y: ny });
       if (snake.pts.length > 90) snake.pts.pop();
 
