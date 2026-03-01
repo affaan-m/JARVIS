@@ -279,19 +279,34 @@ function sendFrame() {
   captureCanvas.toBlob((blob) => {
     if (blob && ws && ws.readyState === WebSocket.OPEN) {
       pendingFrame = true;
-      blob.arrayBuffer().then(buf => ws.send(buf));
+      blob.arrayBuffer().then(buf => {
+        ws.send(buf);
+      }).catch(err => {
+        console.warn('[Send] Error:', err);
+        pendingFrame = false;
+      });
     }
   }, 'image/jpeg', JPEG_QUALITY);
 }
 
-// Kick off the first frame once video is playing
+// Kick off detection loop — retries quickly until video is ready
 function startDetectionLoop() {
-  // Send first frame to start the request-response chain
-  sendFrame();
-  // Also set a safety interval in case a response is dropped
-  setInterval(() => {
-    if (!pendingFrame) sendFrame();
-  }, 2000);
+  console.log('[Detection] Loop started');
+  // Retry every 200ms until first frame succeeds, then request-response takes over
+  const initInterval = setInterval(() => {
+    if (!pendingFrame) {
+      sendFrame();
+      // Once a frame was sent successfully, slow down the safety interval
+      if (pendingFrame) {
+        clearInterval(initInterval);
+        console.log('[Detection] First frame sent, switching to request-response');
+        // Safety fallback in case a response is dropped
+        setInterval(() => {
+          if (!pendingFrame) sendFrame();
+        }, 500);
+      }
+    }
+  }, 200);
 }
 
 // ---------------------------------------------------------------------------
