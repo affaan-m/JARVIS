@@ -189,9 +189,26 @@ class FrameHandler:
             else:
                 logger.info("No face in crop for track_id={}, still sending crop to PimEyes", tid)
 
-            # Step 3: Upscale the crop for PimEyes — WebRTC frames are tiny
-            # PimEyes needs at least ~200x200 face area to work reliably
+            # Step 3: Try the upscaled crop first; if PimEyes can't detect
+            # a face in it, fall back to the full frame (higher resolution,
+            # more context for PimEyes' face detector).
             pimeyes_image = self._upscale_for_pimeyes(crop_bytes)
+
+            # If crop is very small (<150px shortest side), prefer full frame
+            from PIL import Image as _PILImage
+            from io import BytesIO as _BytesIO
+            try:
+                _tmp = _PILImage.open(_BytesIO(crop_bytes))
+                short_side = min(_tmp.size)
+                if short_side < 150:
+                    logger.info(
+                        "Crop too small ({}px) — using full frame for PimEyes",
+                        short_side,
+                    )
+                    full_frame_bytes = base64.b64decode(frame_b64)
+                    pimeyes_image = self._upscale_for_pimeyes(full_frame_bytes)
+            except Exception:
+                pass  # Stick with crop
 
             # Step 4: PimEyes / reverse image search
             search_result = await self._face_searcher.search_face(
