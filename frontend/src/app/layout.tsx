@@ -21,7 +21,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "SPECTER // CLASSIFIED",
+  title: "CIRI // CLASSIFIED",
   description: "Real-time person intelligence platform",
 };
 

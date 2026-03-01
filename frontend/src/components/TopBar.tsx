@@ -1,13 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Shield, Radio, Eye } from "lucide-react";
+import { Shield } from "lucide-react";
 
-interface TopBarProps {
-  personCount: number;
-}
-
-export function TopBar({ personCount }: TopBarProps) {
+export function TopBar() {
   const [clock, setClock] = useState("");
 
   useEffect(() => {
@@ -39,30 +35,8 @@ export function TopBar({ personCount }: TopBarProps) {
           className="text-2xl tracking-[6px]"
           style={{ fontFamily: "var(--font-heading)", color: "var(--text-primary)" }}
         >
-          SPECTER
+          CIRI
         </span>
-        <span
-          className="text-xs px-2 py-0.5 rounded"
-          style={{
-            background: "var(--stamp-red)",
-            color: "#fff",
-            fontFamily: "var(--font-mono)",
-          }}
-        >
-          CLASSIFIED
-        </span>
-      </div>
-
-      {/* Center status */}
-      <div className="flex items-center gap-6 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-dim)" }}>
-        <div className="flex items-center gap-2">
-          <Radio className="w-3 h-3 status-pulse" style={{ color: "var(--intel-green)" }} />
-          <span>AGENTS ONLINE</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Eye className="w-3 h-3" style={{ color: "var(--alert-amber)" }} />
-          <span>{personCount} SUBJECTS</span>
-        </div>
       </div>
 
       {/* Clock */}

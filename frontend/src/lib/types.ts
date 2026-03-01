@@ -75,6 +75,8 @@ export interface IntelSource {
 export interface IntelSummary {
   nm: string;
   sm: string;
+  title?: string;
+  location?: string;
 }
 
 export interface IntelPerson {

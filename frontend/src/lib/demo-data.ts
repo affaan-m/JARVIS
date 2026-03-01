@@ -11,9 +11,9 @@ export const demoPersons: PersonRecord[] = [
     dossier: {
       summary: "Builder-operator with strong infra instincts and a habit of shipping live demos under time pressure.",
       title: "Infrastructure Lead",
-      company: "SPECTER",
+      company: "CIRI",
       workHistory: [
-        { role: "Infra Lead", company: "SPECTER", period: "2026-present" },
+        { role: "Infra Lead", company: "CIRI", period: "2026-present" },
         { role: "Full-Stack Engineer", company: "Stealth", period: "2024-2026" },
       ],
       education: [{ school: "UC Berkeley", degree: "B.S. Computer Science" }],
@@ -36,8 +36,8 @@ export const demoPersons: PersonRecord[] = [
     dossier: {
       summary: "Frontend-heavy operator focused on cinematic intelligence-board UX and judge-facing polish.",
       title: "Frontend Systems",
-      company: "SPECTER",
-      workHistory: [{ role: "Frontend Systems", company: "SPECTER", period: "2026-present" }],
+      company: "CIRI",
+      workHistory: [{ role: "Frontend Systems", company: "CIRI", period: "2026-present" }],
       education: [{ school: "Stanford", degree: "HCI" }],
       socialProfiles: {
         linkedin: "linkedin.com/in/minasol",
@@ -58,8 +58,8 @@ export const demoPersons: PersonRecord[] = [
     dossier: {
       summary: "Owns synthesis and evaluation flows, with a bias for observability before scale.",
       title: "Research Systems",
-      company: "SPECTER",
-      workHistory: [{ role: "Research Systems", company: "SPECTER", period: "2026-present" }],
+      company: "CIRI",
+      workHistory: [{ role: "Research Systems", company: "CIRI", period: "2026-present" }],
       education: [{ school: "MIT", degree: "AI + Systems" }],
       socialProfiles: {
         github: "github.com/elirowan",
@@ -97,6 +97,8 @@ export const demoPeople: IntelPerson[] = [
     summary: {
       nm: "ALEX MERCER",
       sm: "High-priority intelligence target with cross-sector ties spanning Silicon Valley tech firms and defense contracting networks. Multiple corporate entities registered under associated aliases. Financial footprint suggests diversified asset portfolio with international exposure.",
+      title: "Software Engineer",
+      location: "San Francisco, CA",
     },
     sources: [
       { nm: "LinkedIn Profile", tp: "SOCIAL", sn: "Software engineer at Google, previously at Meta. 500+ connections with notable defense industry ties." },
@@ -113,6 +115,8 @@ export const demoPeople: IntelPerson[] = [
     summary: {
       nm: "DIANA VOSS",
       sm: "Former intelligence analyst turned private consultant. Extensive network in European defense procurement circles. Multiple shell companies traced to Cyprus and Liechtenstein.",
+      title: "Private Consultant",
+      location: "Berlin, Germany",
     },
     sources: [
       { nm: "Interpol Red Notice DB", tp: "LAW ENFORCEMENT", sn: "No active notices. Historical query flagged from German BKA in 2021 — status unclear." },
@@ -128,6 +132,8 @@ export const demoPeople: IntelPerson[] = [
     summary: {
       nm: "MARCUS CHEN",
       sm: "Venture capitalist with deep ties to dual-use technology startups. Portfolio includes several companies with known defense contracts.",
+      title: "Managing Partner",
+      location: "New York, NY",
     },
     sources: [
       { nm: "Crunchbase Profile", tp: "CORPORATE", sn: "Managing Partner at Apex Ventures. 23 portfolio companies, 4 exits. Focus on AI/ML and cybersecurity." },
@@ -141,6 +147,8 @@ export const demoPeople: IntelPerson[] = [
     summary: {
       nm: "SARAH OKONKWO",
       sm: "International trade attorney specializing in sanctions compliance. Previously at the U.S. Treasury Department's OFAC division.",
+      title: "Int'l Trade Attorney",
+      location: "Washington, D.C.",
     },
     sources: [
       { nm: "DC Bar Association", tp: "PUBLIC RECORD", sn: "Licensed attorney since 2011. No disciplinary actions. Specialization in international trade law." },
