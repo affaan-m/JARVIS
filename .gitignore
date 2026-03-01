@@ -1,0 +1,9 @@
+# YOLO model weights
+yolo11n.pt
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
