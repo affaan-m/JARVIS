@@ -1,4 +1,4 @@
-import type { ActivityRecord, ConnectionRecord, PersonRecord } from "./types";
+import type { ActivityRecord, ConnectionRecord, IntelPerson, PersonRecord } from "./types";
 
 export const demoPersons: PersonRecord[] = [
   {
@@ -86,6 +86,65 @@ export const demoConnections: ConnectionRecord[] = [
     personBId: "person_3",
     relationshipType: "pipeline-planning",
     description: "Aligning ingestion, observability, and evaluation contracts.",
+  },
+];
+
+export const demoPeople: IntelPerson[] = [
+  {
+    id: "p1",
+    name: "Alex Mercer",
+    status: "complete",
+    summary: {
+      nm: "ALEX MERCER",
+      sm: "High-priority intelligence target with cross-sector ties spanning Silicon Valley tech firms and defense contracting networks. Multiple corporate entities registered under associated aliases. Financial footprint suggests diversified asset portfolio with international exposure.",
+    },
+    sources: [
+      { nm: "LinkedIn Profile", tp: "SOCIAL", sn: "Software engineer at Google, previously at Meta. 500+ connections with notable defense industry ties." },
+      { nm: "County Court Records", tp: "PUBLIC RECORD", sn: "No criminal records found across federal and state databases. One civil filing from 2019 — resolved." },
+      { nm: "TechCrunch Feature", tp: "MEDIA", sn: "Featured in Series A funding coverage. Company valued at $12M with Andreessen Horowitz investors." },
+      { nm: "SEC Corporate Filing", tp: "CORPORATE", sn: "Listed as board director for three registered LLCs. Two in Delaware, one in Nevada." },
+      { nm: "IEEE Research Paper", tp: "ACADEMIC", sn: "Co-authored neural architecture optimization paper. Cited 340 times. Collaborators from MIT and Stanford." },
+    ],
+  },
+  {
+    id: "p2",
+    name: "Diana Voss",
+    status: "complete",
+    summary: {
+      nm: "DIANA VOSS",
+      sm: "Former intelligence analyst turned private consultant. Extensive network in European defense procurement circles. Multiple shell companies traced to Cyprus and Liechtenstein.",
+    },
+    sources: [
+      { nm: "Interpol Red Notice DB", tp: "LAW ENFORCEMENT", sn: "No active notices. Historical query flagged from German BKA in 2021 — status unclear." },
+      { nm: "Companies House UK", tp: "CORPORATE", sn: "Director of Meridian Consulting Ltd, incorporated 2019. Annual accounts show £2.4M revenue." },
+      { nm: "Der Spiegel Article", tp: "MEDIA", sn: "Named in investigative piece on European defense lobbying networks. Denied involvement." },
+      { nm: "Property Registry Cyprus", tp: "PUBLIC RECORD", sn: "Two properties registered in Limassol. Combined estimated value €1.8M." },
+    ],
+  },
+  {
+    id: "p3",
+    name: "Marcus Chen",
+    status: "scanning",
+    summary: {
+      nm: "MARCUS CHEN",
+      sm: "Venture capitalist with deep ties to dual-use technology startups. Portfolio includes several companies with known defense contracts.",
+    },
+    sources: [
+      { nm: "Crunchbase Profile", tp: "CORPORATE", sn: "Managing Partner at Apex Ventures. 23 portfolio companies, 4 exits. Focus on AI/ML and cybersecurity." },
+      { nm: "Twitter/X Activity", tp: "SOCIAL", sn: "Active in AI policy circles. Recent posts about export control reform and ITAR regulations." },
+    ],
+  },
+  {
+    id: "p4",
+    name: "Sarah Okonkwo",
+    status: "inactive",
+    summary: {
+      nm: "SARAH OKONKWO",
+      sm: "International trade attorney specializing in sanctions compliance. Previously at the U.S. Treasury Department's OFAC division.",
+    },
+    sources: [
+      { nm: "DC Bar Association", tp: "PUBLIC RECORD", sn: "Licensed attorney since 2011. No disciplinary actions. Specialization in international trade law." },
+    ],
   },
 ];
 

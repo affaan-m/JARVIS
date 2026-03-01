@@ -62,3 +62,25 @@ export interface ActivityRecord {
   agentName?: string;
   timestamp: number;
 }
+
+// IntelBoard v5 types
+export type IntelPersonStatus = "complete" | "scanning" | "inactive";
+
+export interface IntelSource {
+  nm: string;
+  tp: string;
+  sn: string;
+}
+
+export interface IntelSummary {
+  nm: string;
+  sm: string;
+}
+
+export interface IntelPerson {
+  id: string;
+  name: string;
+  status: IntelPersonStatus;
+  summary: IntelSummary;
+  sources: IntelSource[];
+}
