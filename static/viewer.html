@@ -393,14 +393,26 @@ async function connectGlasses() {
   setStatus('connecting', 'Connecting to glasses...');
 
   try {
-    let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+    let iceServers = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+    ];
     try {
-      const turnResp = await fetch(TURN_URL, {
-        headers: { 'Authorization': 'Basic ' + btoa(':' + SIGNAL_PASSWORD) }
-      });
-      if (turnResp.ok) {
+      // Try without Authorization header first (avoids CORS preflight block)
+      let turnResp = await fetch(TURN_URL).catch(() => null);
+      // Fall back to auth header if no-auth fails
+      if (!turnResp || !turnResp.ok) {
+        turnResp = await fetch(TURN_URL, {
+          headers: { 'Authorization': 'Basic ' + btoa(':' + SIGNAL_PASSWORD) }
+        }).catch(() => null);
+      }
+      if (turnResp && turnResp.ok) {
         const turnData = await turnResp.json();
-        if (turnData.iceServers) iceServers = turnData.iceServers;
+        if (turnData.iceServers) {
+          iceServers = turnData.iceServers;
+          console.log('[TURN] Got TURN servers:', iceServers.length);
+        }
       }
     } catch (e) {
       console.warn('[TURN] Failed to fetch, using STUN only:', e);
