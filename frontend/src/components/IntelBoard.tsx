@@ -643,18 +643,6 @@ export default function IntelBoard() {
             </div>
           </div>
 
-          {/* BACK BUTTON */}
-          {tier === 3 && (
-            <button onClick={backFromDoc} style={{
-              position: "absolute", top: 16, left: 16, zIndex: 60,
-              padding: "8px 18px", background: "rgba(255,255,255,.06)",
-              border: "1px solid rgba(255,255,255,.1)", borderRadius: 6,
-              color: "#94a3b8", fontSize: 12, fontWeight: 600, cursor: "pointer",
-              backdropFilter: "blur(8px)", display: "flex", alignItems: "center", gap: 6,
-            }}>
-              <span style={{ fontSize: 14 }}>←</span> Back
-            </button>
-          )}
         </div>
       </div>
 
