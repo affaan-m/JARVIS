@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VisionClaw - Remote Expert View</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      height: 100vh; overflow: hidden;
+    }
+    #video-container {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+      background: #111; touch-action: none;
+    }
+    /* Fallback single video (used when no local camera) */
+    #fallback-video {
+      width: 100%; height: 100%; object-fit: contain;
+    }
+    /* PiP layout */
+    #pip-container {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: #000; display: none;
+    }
+    #main-video {
+      width: 100%; height: 100%; object-fit: contain;
+    }
+    /* Detection overlay canvas — sits on top of the video */
+    #detection-overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 4;
+    }
+    /* Hidden canvas for frame capture */
+    #capture-canvas { display: none; }
+    /* Detection status badge */
+    #detection-status {
+      position: absolute; bottom: 16px; left: 16px;
+      padding: 4px 10px; border-radius: 12px; font-size: 11px;
+      font-weight: 500; z-index: 10;
+      background: rgba(255,255,255,0.08); color: #666;
+      transition: all 0.3s;
+    }
+    #detection-status.active { background: rgba(48,209,88,0.2); color: #30d158; }
+    #detection-status.connecting { background: rgba(255,204,0,0.2); color: #ffcc00; }
+    #detection-status.error { background: rgba(255,59,48,0.2); color: #ff3b30; }
+    /* Person count HUD */
+    #person-count {
+      position: absolute; bottom: 16px; right: 16px;
+      padding: 6px 14px; border-radius: 12px; font-size: 13px;
+      font-weight: 600; z-index: 10;
+      background: rgba(0,255,0,0.15); color: #30d158;
+      display: none;
+    }
+    #pip-video {
+      position: absolute;
+      top: 16px; right: 16px;
+      width: 160px; height: 213px;
+      object-fit: cover;
+      border-radius: 12px;
+      border: 2px solid rgba(255,255,255,0.3);
+      cursor: pointer;
+      z-index: 5;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      background: #1a1a1a;
+    }
+    @media (max-width: 600px) {
+      #pip-video {
+        width: 100px; height: 133px;
+        top: 12px; right: 12px;
+      }
+    }
+    #controls {
+      position: absolute; top: 16px; right: 16px;
+      display: flex; gap: 8px; z-index: 10;
+    }
+    input {
+      padding: 12px 16px; font-size: 20px; border-radius: 8px;
+      border: 1px solid #333; background: #222; color: #fff;
+      text-transform: uppercase; letter-spacing: 6px; width: 180px;
+      text-align: center; font-family: 'SF Mono', 'Menlo', monospace;
+    }
+    input::placeholder {
+      letter-spacing: 2px; font-size: 14px; color: #555;
+    }
+    button {
+      padding: 8px 16px; font-size: 13px; border-radius: 8px;
+      border: none; cursor: pointer; font-weight: 600;
+      transition: opacity 0.2s;
+    }
+    button:hover { opacity: 0.85; }
+    button:active { opacity: 0.7; }
+    #join-btn { background: #0a84ff; color: #fff; }
+    #disconnect-btn { background: #ff3b30; color: #fff; display: none; }
+    #mic-btn { background: #333; color: #fff; display: none; }
+    #mic-btn.muted { background: #ff3b30; }
+    #cam-btn { background: #333; color: #fff; display: none; }
+    #cam-btn.muted { background: #ff3b30; }
+    #status {
+      position: absolute; top: 16px; left: 16px;
+      padding: 6px 14px; border-radius: 16px; font-size: 13px;
+      font-weight: 500; z-index: 10;
+    }
+    .status-waiting { background: rgba(255,204,0,0.2); color: #ffcc00; }
+    .status-connected { background: rgba(48,209,88,0.2); color: #30d158; }
+    .status-disconnected { background: rgba(255,59,48,0.2); color: #ff3b30; }
+    .status-idle { background: rgba(255,255,255,0.1); color: #888; }
+    #join-panel {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      text-align: center; z-index: 10;
+    }
+    #join-panel h1 {
+      font-size: 28px; font-weight: 600; margin-bottom: 8px;
+    }
+    #join-panel p {
+      color: #888; margin-bottom: 24px; font-size: 15px;
+    }
+    .join-row {
+      display: flex; gap: 12px; justify-content: center;
+    }
+    #waiting-msg {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      text-align: center; display: none; z-index: 10;
+    }
+    #waiting-msg p { color: #888; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <div id="video-container">
+    <!-- Fallback: single video for audio-only (no local camera) -->
+    <video id="fallback-video" autoplay playsinline></video>
+
+    <!-- PiP layout: two videos -->
+    <div id="pip-container">
+      <video id="main-video" autoplay playsinline></video>
+      <video id="pip-video" autoplay playsinline muted onclick="swapVideos()"></video>
+    </div>
+
+    <div id="status" class="status-idle">Not Connected</div>
+
+    <div id="join-panel">
+      <h1>VisionClaw</h1>
+      <p>Click to connect to the live stream</p>
+      <div class="join-row">
+        <input id="room-input" maxlength="6" placeholder="CODE" value="VCLAW1" style="display:none;">
+        <button id="join-btn" onclick="joinRoom()">Stream</button>
+      </div>
+    </div>
+
+    <div id="waiting-msg">
+      <p>Connected to room. Waiting for stream...</p>
+    </div>
+
+    <!-- Detection overlay (drawn on top of video) -->
+    <canvas id="detection-overlay"></canvas>
+    <!-- Hidden canvas for capturing video frames -->
+    <canvas id="capture-canvas"></canvas>
+    <!-- Detection HUD -->
+    <div id="detection-status">Detection: OFF</div>
+    <div id="person-count"></div>
+
+    <div id="controls">
+      <button id="cam-btn" onclick="toggleCam()">Cam: ON</button>
+      <button id="mic-btn" onclick="toggleMic()">Mic: ON</button>
+      <button id="disconnect-btn" onclick="disconnectSession()">Disconnect</button>
+    </div>
+  </div>
+
+  <script>
+    let ws, pc, localStream;
+    let localVideoStream = null;
+    let pendingCandidates = [];
+    let isSwapped = false;
+    let remoteStream = null;
+    let myViewerId = null; // Assigned by server on room_joined
+    const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${location.host}`;
+
+    // Auto-reconnect state
+    const MAX_RECONNECT_ATTEMPTS = 5;
+    const RECONNECT_DELAY_MS = 3000;
+    let reconnectAttempts = 0;
+    let reconnectTimer = null;
+    let lastRoomCode = null;
+
+    function joinRoom() {
+      const code = document.getElementById('room-input').value.toUpperCase().trim();
+      if (code.length !== 6) return;
+      lastRoomCode = code;
+      reconnectAttempts = 0;
+
+      // Clean up any previous session
+      cleanup();
+
+      connectAndJoin(code);
+    }
+
+    function connectAndJoin(code) {
+      ws = new WebSocket(wsUrl);
+      const sock = ws;
+      ws.onopen = () => {
+        if (sock.readyState === WebSocket.OPEN) {
+          sock.send(JSON.stringify({ type: 'join', room: code }));
+          setStatus('Joining...', 'waiting');
+        }
+      };
+      ws.onmessage = (e) => handleSignaling(JSON.parse(e.data));
+      ws.onclose = () => {
+        setStatus('Disconnected', 'disconnected');
+        showControls(false);
+        // Auto-reconnect if we were in a session
+        attemptReconnect();
+      };
+      ws.onerror = () => {
+        setStatus('Connection error', 'disconnected');
+      };
+    }
+
+    function attemptReconnect() {
+      if (!lastRoomCode || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return;
+      if (reconnectTimer) return; // Already scheduled
+
+      reconnectAttempts++;
+      console.log(`[Reconnect] Attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${RECONNECT_DELAY_MS/1000}s...`);
+      setStatus(`Reconnecting (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`, 'waiting');
+
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        if (!lastRoomCode) return;
+        // Clean up old connection state but keep lastRoomCode
+        if (pc) { pc.close(); pc = null; }
+        if (ws) { ws.close(); ws = null; }
+        connectAndJoin(lastRoomCode);
+      }, RECONNECT_DELAY_MS);
+    }
+
+    async function handleSignaling(msg) {
+      switch (msg.type) {
+        case 'room_joined':
+          // Store viewerId for debugging
+          myViewerId = msg.viewerId || null;
+          console.log('[Signaling] Joined room, viewerId:', myViewerId);
+          setStatus('Waiting for stream...', 'waiting');
+          document.getElementById('join-panel').style.display = 'none';
+          document.getElementById('waiting-msg').style.display = 'block';
+          break;
+
+        case 'offer':
+          document.getElementById('waiting-msg').style.display = 'none';
+          pendingCandidates = [];
+          await setupPeerConnection();
+          await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
+          // Flush any candidates that arrived during setup
+          for (const c of pendingCandidates) {
+            await pc.addIceCandidate(c);
+          }
+          console.log('Flushed', pendingCandidates.length, 'buffered candidates');
+          pendingCandidates = [];
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          ws.send(JSON.stringify({ type: 'answer', sdp: answer.sdp }));
+          break;
+
+        case 'candidate': {
+          const candidate = {
+            candidate: msg.candidate,
+            sdpMid: msg.sdpMid,
+            sdpMLineIndex: msg.sdpMLineIndex
+          };
+          if (pc && pc.remoteDescription) {
+            await pc.addIceCandidate(candidate);
+          } else {
+            pendingCandidates.push(candidate);
+          }
+          break;
+        }
+
+        case 'peer_left':
+          if (pc) { pc.close(); pc = null; }
+          resetVideoElements();
+          // Don't go back to join screen -- the iOS app may be backgrounded
+          // and will rejoin within the grace period. Stay in the room.
+          setStatus('Waiting for reconnect...', 'waiting');
+          document.getElementById('waiting-msg').style.display = 'block';
+          document.getElementById('waiting-msg').querySelector('p').textContent =
+            'Stream paused. Waiting for glasses to reconnect...';
+          showControls(false);
+          break;
+
+        case 'error':
+          setStatus(msg.message, 'disconnected');
+          document.getElementById('join-panel').style.display = 'block';
+          // Don't auto-reconnect on server errors like "Room not found"
+          lastRoomCode = null;
+          break;
+      }
+    }
+
+    async function setupPeerConnection() {
+      // Close any existing peer connection
+      if (pc) { pc.close(); pc = null; }
+
+      // Fetch TURN credentials for NAT traversal across networks
+      let iceServers = [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ];
+      try {
+        const resp = await fetch('/api/turn');
+        const creds = await resp.json();
+        if (creds && creds.urls) {
+          iceServers.push({
+            urls: creds.urls,
+            username: creds.username,
+            credential: creds.credential
+          });
+          console.log('TURN credentials loaded:', JSON.stringify(creds.urls));
+        } else if (creds && creds.iceServers) {
+          for (const s of creds.iceServers) {
+            iceServers.push({ urls: s.urls, username: s.username, credential: s.credential });
+          }
+          // Log each TURN server with credential info for debugging
+          for (const s of creds.iceServers) {
+            const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+            console.log('TURN server:', urls[0], '| user:', s.username?.substring(0, 8) + '...', '| cred length:', s.credential?.length);
+          }
+          console.log('TURN credentials loaded:', creds.iceServers.length, 'servers');
+        } else {
+          console.log('TURN response format unexpected:', JSON.stringify(creds));
+        }
+      } catch (e) {
+        console.log('No TURN credentials, STUN only:', e.message);
+      }
+      const config = { iceServers, iceCandidatePoolSize: 2 };
+      console.log('ICE servers config:', JSON.stringify(iceServers.map(s => s.urls)));
+      pc = new RTCPeerConnection(config);
+
+      // Get mic AND camera for bidirectional audio+video
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
+        });
+        localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+        localVideoStream = localStream;
+        console.log('Camera + mic access granted');
+      } catch (e) {
+        // Fallback: try audio-only if camera denied
+        console.log('Camera denied, trying audio-only:', e.message);
+        localVideoStream = null;
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+        } catch (e2) {
+          console.log('No mic or camera access');
+          localStream = null;
+        }
+      }
+
+      pc.ontrack = (e) => {
+        if (e.streams && e.streams[0]) {
+          remoteStream = e.streams[0];
+          // Don't show PiP yet -- wait for ICE "connected" to ensure media is flowing
+        }
+      };
+
+      let candidateCounts = { host: 0, srflx: 0, relay: 0 };
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          const c = e.candidate.candidate;
+          if (c.includes('relay')) { candidateCounts.relay++; console.log('ICE candidate: RELAY (TURN)', c); }
+          else if (c.includes('srflx')) { candidateCounts.srflx++; console.log('ICE candidate: STUN (srflx)', c); }
+          else if (c.includes('host')) { candidateCounts.host++; }
+          ws.send(JSON.stringify({
+            type: 'candidate',
+            candidate: e.candidate.candidate,
+            sdpMid: e.candidate.sdpMid,
+            sdpMLineIndex: e.candidate.sdpMLineIndex
+          }));
+        } else {
+          console.log('ICE gathering complete. Candidates:', JSON.stringify(candidateCounts));
+          if (candidateCounts.relay === 0 && candidateCounts.srflx === 0) {
+            console.warn('WARNING: No STUN or TURN candidates. TURN credentials may be invalid or network is very restrictive.');
+          }
+        }
+      };
+
+      pc.onicegatheringstatechange = () => {
+        console.log('ICE gathering state:', pc.iceGatheringState);
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log('ICE connection state:', pc.iceConnectionState);
+        switch (pc.iceConnectionState) {
+          case 'connected':
+          case 'completed':
+            setStatus('Live', 'connected');
+            showControls(true);
+            if (remoteStream) showVideoLayout();
+            break;
+          case 'disconnected':
+            setStatus('Reconnecting...', 'waiting');
+            break;
+          case 'failed':
+            setStatus('Connection failed', 'disconnected');
+            break;
+          case 'closed':
+            setStatus('Disconnected', 'disconnected');
+            showControls(false);
+            break;
+        }
+      };
+    }
+
+    // Show the appropriate video layout based on whether we have a local camera
+    function showVideoLayout() {
+      if (localVideoStream && remoteStream) {
+        // PiP mode: both cameras available
+        document.getElementById('fallback-video').style.display = 'none';
+        document.getElementById('pip-container').style.display = 'block';
+
+        const mainVideo = document.getElementById('main-video');
+        const pipVideo = document.getElementById('pip-video');
+
+        // Default: main = remote (iOS glasses), pip = local (browser camera, mirrored)
+        mainVideo.srcObject = remoteStream;
+        mainVideo.muted = false;
+        pipVideo.srcObject = localVideoStream;
+        pipVideo.muted = true;
+        pipVideo.style.transform = 'scaleX(-1)';
+        isSwapped = false;
+      } else if (remoteStream) {
+        // No local camera: fallback to single video
+        document.getElementById('pip-container').style.display = 'none';
+        document.getElementById('fallback-video').style.display = 'block';
+        document.getElementById('fallback-video').srcObject = remoteStream;
+      }
+    }
+
+    function swapVideos() {
+      const mainVideo = document.getElementById('main-video');
+      const pipVideo = document.getElementById('pip-video');
+
+      if (isSwapped) {
+        // Swap back to default: main = remote, pip = local
+        mainVideo.srcObject = remoteStream;
+        mainVideo.muted = false;
+        mainVideo.style.transform = '';
+        pipVideo.srcObject = localVideoStream;
+        pipVideo.muted = true;
+        pipVideo.style.transform = 'scaleX(-1)';
+      } else {
+        // Swap: main = local (mirrored), pip = remote
+        mainVideo.srcObject = localVideoStream;
+        mainVideo.muted = true;
+        mainVideo.style.transform = 'scaleX(-1)';
+        pipVideo.srcObject = remoteStream;
+        pipVideo.muted = false;
+        pipVideo.style.transform = '';
+      }
+      isSwapped = !isSwapped;
+    }
+
+    function toggleMic() {
+      if (!localStream) return;
+      const track = localStream.getAudioTracks()[0];
+      if (!track) return;
+      track.enabled = !track.enabled;
+      const btn = document.getElementById('mic-btn');
+      btn.textContent = track.enabled ? 'Mic: ON' : 'Mic: OFF';
+      btn.classList.toggle('muted', !track.enabled);
+    }
+
+    function toggleCam() {
+      if (!localVideoStream) return;
+      const track = localVideoStream.getVideoTracks()[0];
+      if (!track) return;
+      track.enabled = !track.enabled;
+      const btn = document.getElementById('cam-btn');
+      btn.textContent = track.enabled ? 'Cam: ON' : 'Cam: OFF';
+      btn.classList.toggle('muted', !track.enabled);
+    }
+
+    function resetVideoElements() {
+      document.getElementById('fallback-video').srcObject = null;
+      document.getElementById('main-video').srcObject = null;
+      document.getElementById('pip-video').srcObject = null;
+      document.getElementById('pip-container').style.display = 'none';
+      document.getElementById('fallback-video').style.display = 'block';
+      remoteStream = null;
+      isSwapped = false;
+    }
+
+    function cleanup() {
+      // Cancel any pending reconnect
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (pc) { pc.close(); pc = null; }
+      if (ws) {
+        ws.onclose = null;  // Prevent triggering auto-reconnect
+        ws.onerror = null;
+        ws.close();
+        ws = null;
+      }
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+        localVideoStream = null;
+      }
+      resetVideoElements();
+      myViewerId = null;
+    }
+
+    function disconnectSession() {
+      lastRoomCode = null; // Prevent auto-reconnect
+      cleanup();
+      setStatus('Disconnected', 'disconnected');
+      showControls(false);
+      document.getElementById('join-panel').style.display = 'block';
+      document.getElementById('room-input').value = '';
+    }
+
+    function showControls(visible) {
+      document.getElementById('mic-btn').style.display = visible ? 'inline-block' : 'none';
+      document.getElementById('cam-btn').style.display = (visible && localVideoStream) ? 'inline-block' : 'none';
+      document.getElementById('disconnect-btn').style.display = visible ? 'inline-block' : 'none';
+    }
+
+    function setStatus(text, cls) {
+      const el = document.getElementById('status');
+      el.textContent = text;
+      el.className = 'status-' + cls;
+    }
+
+    // Allow Enter key to join
+    document.getElementById('room-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') joinRoom();
+    });
+
+    // =====================================================================
+    // DETECTION OVERLAY — Stream frames to Python server, render results
+    // =====================================================================
+    const DETECTION_WS_URL = 'ws://localhost:8765/ws/detect'; // Update for Daytona deployment
+    const DETECTION_FPS = 5;
+    const JPEG_QUALITY = 0.7;
+
+    let detectionWs = null;
+    let detectionInterval = null;
+    let detectionActive = false;
+    let detectionReconnectTimer = null;
+    let latestDetections = [];
+    let overlayRafId = null;
+
+    function getActiveVideoElement() {
+      // Return whichever video element is currently showing the remote stream
+      const pip = document.getElementById('pip-container');
+      if (pip.style.display !== 'none') {
+        const main = document.getElementById('main-video');
+        const pipV = document.getElementById('pip-video');
+        // Remote stream is on main unless swapped
+        return isSwapped ? pipV : main;
+      }
+      return document.getElementById('fallback-video');
+    }
+
+    function captureAndSendFrame() {
+      if (!detectionWs || detectionWs.readyState !== WebSocket.OPEN) return;
+      const video = getActiveVideoElement();
+      if (!video || !video.videoWidth || !video.videoHeight) return;
+
+      const canvas = document.getElementById('capture-canvas');
+      // Send at reduced resolution for speed
+      const sendW = Math.min(video.videoWidth, 640);
+      const sendH = Math.round(sendW * (video.videoHeight / video.videoWidth));
+      canvas.width = sendW;
+      canvas.height = sendH;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, sendW, sendH);
+
+      canvas.toBlob((blob) => {
+        if (blob && detectionWs && detectionWs.readyState === WebSocket.OPEN) {
+          detectionWs.send(blob);
+        }
+      }, 'image/jpeg', JPEG_QUALITY);
+    }
+
+    function startDetection() {
+      if (detectionActive) return;
+      detectionActive = true;
+
+      const statusEl = document.getElementById('detection-status');
+      statusEl.textContent = 'Detection: Connecting...';
+      statusEl.className = 'connecting';
+
+      detectionWs = new WebSocket(DETECTION_WS_URL);
+      detectionWs.binaryType = 'arraybuffer';
+
+      detectionWs.onopen = () => {
+        console.log('[Detection] WebSocket connected');
+        statusEl.textContent = 'Detection: ON';
+        statusEl.className = 'active';
+        // Start frame capture loop
+        detectionInterval = setInterval(captureAndSendFrame, 1000 / DETECTION_FPS);
+        // Start overlay render loop
+        if (!overlayRafId) renderOverlay();
+      };
+
+      detectionWs.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          latestDetections = data.detections || [];
+          // Update person count HUD
+          const countEl = document.getElementById('person-count');
+          if (latestDetections.length > 0) {
+            countEl.style.display = 'block';
+            countEl.textContent = `${latestDetections.length} person${latestDetections.length !== 1 ? 's' : ''}`;
+          } else {
+            countEl.style.display = 'none';
+          }
+        } catch (err) {
+          console.warn('[Detection] Parse error:', err);
+        }
+      };
+
+      detectionWs.onclose = () => {
+        console.log('[Detection] WebSocket closed');
+        clearInterval(detectionInterval);
+        detectionInterval = null;
+        statusEl.textContent = 'Detection: Reconnecting...';
+        statusEl.className = 'connecting';
+        // Auto-reconnect after 2s if still active
+        if (detectionActive) {
+          detectionReconnectTimer = setTimeout(() => {
+            detectionActive = false; // reset flag so startDetection works
+            startDetection();
+          }, 2000);
+        }
+      };
+
+      detectionWs.onerror = (err) => {
+        console.warn('[Detection] WebSocket error:', err);
+        statusEl.textContent = 'Detection: Error';
+        statusEl.className = 'error';
+      };
+    }
+
+    function stopDetection() {
+      detectionActive = false;
+      if (detectionReconnectTimer) {
+        clearTimeout(detectionReconnectTimer);
+        detectionReconnectTimer = null;
+      }
+      if (detectionInterval) {
+        clearInterval(detectionInterval);
+        detectionInterval = null;
+      }
+      if (detectionWs) {
+        detectionWs.close();
+        detectionWs = null;
+      }
+      if (overlayRafId) {
+        cancelAnimationFrame(overlayRafId);
+        overlayRafId = null;
+      }
+      latestDetections = [];
+      // Clear overlay
+      const overlay = document.getElementById('detection-overlay');
+      const ctx = overlay.getContext('2d');
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      // Reset HUD
+      const statusEl = document.getElementById('detection-status');
+      statusEl.textContent = 'Detection: OFF';
+      statusEl.className = '';
+      document.getElementById('person-count').style.display = 'none';
+    }
+
+    function renderOverlay() {
+      const overlay = document.getElementById('detection-overlay');
+      const video = getActiveVideoElement();
+      if (!video) {
+        overlayRafId = requestAnimationFrame(renderOverlay);
+        return;
+      }
+
+      // Match overlay size to container
+      const container = document.getElementById('video-container');
+      const cw = container.clientWidth;
+      const ch = container.clientHeight;
+      if (overlay.width !== cw || overlay.height !== ch) {
+        overlay.width = cw;
+        overlay.height = ch;
+      }
+
+      const ctx = overlay.getContext('2d');
+      ctx.clearRect(0, 0, cw, ch);
+
+      if (!latestDetections.length || !video.videoWidth) {
+        overlayRafId = requestAnimationFrame(renderOverlay);
+        return;
+      }
+
+      // Compute letterbox offset (object-fit: contain)
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      const videoAspect = vw / vh;
+      const containerAspect = cw / ch;
+
+      let renderW, renderH, offsetX, offsetY;
+      if (videoAspect > containerAspect) {
+        // Video wider than container — pillarbox (bars top/bottom)
+        renderW = cw;
+        renderH = cw / videoAspect;
+        offsetX = 0;
+        offsetY = (ch - renderH) / 2;
+      } else {
+        // Video taller — letterbox (bars left/right)
+        renderH = ch;
+        renderW = ch * videoAspect;
+        offsetX = (cw - renderW) / 2;
+        offsetY = 0;
+      }
+
+      // Draw each detection
+      for (const det of latestDetections) {
+        const x1 = offsetX + det.x1 * renderW;
+        const y1 = offsetY + det.y1 * renderH;
+        const x2 = offsetX + det.x2 * renderW;
+        const y2 = offsetY + det.y2 * renderH;
+        const bw = x2 - x1;
+        const bh = y2 - y1;
+
+        const color = det.color || '#00FF00';
+
+        // Bounding box
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x1, y1, bw, bh);
+
+        // Label background
+        const label = `${det.name} ${Math.round(det.confidence * 100)}%`;
+        ctx.font = 'bold 13px -apple-system, BlinkMacSystemFont, sans-serif';
+        const tm = ctx.measureText(label);
+        const labelH = 20;
+        const labelW = tm.width + 10;
+
+        ctx.fillStyle = color;
+        ctx.fillRect(x1, y1 - labelH, labelW, labelH);
+
+        // Label text
+        ctx.fillStyle = '#000';
+        ctx.fillText(label, x1 + 5, y1 - 5);
+      }
+
+      overlayRafId = requestAnimationFrame(renderOverlay);
+    }
+
+    // --- Integration hooks: patch existing functions ---
+    const _origShowVideoLayout = showVideoLayout;
+    showVideoLayout = function() {
+      _origShowVideoLayout();
+      startDetection();
+    };
+
+    const _origResetVideoElements = resetVideoElements;
+    resetVideoElements = function() {
+      stopDetection();
+      _origResetVideoElements();
+    };
+
+    const _origCleanup = cleanup;
+    cleanup = function() {
+      // stopDetection is called via resetVideoElements inside _origCleanup
+      _origCleanup();
+    };
+  </script>
+</body>
+</html>

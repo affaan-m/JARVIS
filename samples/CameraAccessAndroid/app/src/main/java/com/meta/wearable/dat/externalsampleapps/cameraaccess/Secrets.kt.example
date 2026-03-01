@@ -1,0 +1,19 @@
+// Copy this file to Secrets.kt and fill in your values.
+// Secrets.kt is gitignored and will not be committed.
+
+package com.meta.wearable.dat.externalsampleapps.cameraaccess
+
+object Secrets {
+    // REQUIRED: Get your key at https://aistudio.google.com/apikey
+    const val geminiAPIKey = "YOUR_GEMINI_API_KEY"
+
+    // OPTIONAL: OpenClaw gateway config (for agentic tool-calling)
+    // Use your Mac's Bonjour hostname (run: scutil --get LocalHostName)
+    const val openClawHost = "http://YOUR_MAC_HOSTNAME.local"
+    const val openClawPort = 18789
+    const val openClawHookToken = "YOUR_OPENCLAW_HOOK_TOKEN"
+    const val openClawGatewayToken = "YOUR_OPENCLAW_GATEWAY_TOKEN"
+
+    // OPTIONAL: WebRTC signaling server URL (for live POV streaming)
+    const val webrtcSignalingURL = "wss://YOUR_SIGNALING_SERVER"
+}

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2" project="cameraaccess">
+
+    <!-- Home Screen -->
+    <string name="register_button_title" description="Connect App">Connect my glasses</string>
+    <string name="unregister_button_title" description="Disconnect App">Disconnect</string>
+    <string name="stream_button_title" description="Start streaming">Start streaming</string>
+    <string name="stop_stream_button_title" description="Stop streaming">Stop streaming</string>
+    <string name="home_tip_video_title" description="Tip title about video capture">Video Capture</string>
+    <string name="home_tip_audio_title" description="Tip title about audio">Open-Ear Audio</string>
+    <string name="home_tip_hands_title" description="Tip title about hands free">Enjoy On-the-Go</string>
+    <string name="home_tip_video" description="Tip about video capture">Record videos directly from your glasses, from your point of view.</string>
+    <string name="home_tip_audio" description="Tip about audio">Hear notifications while keeping your ears open to the world around you.</string>
+    <string name="home_tip_hands" description="Tip about hands free">Stay hands-free while you move through your day. Move freely, stay connected.</string>
+    <string name="home_redirect_message" description="Redirect message">You\'ll be redirected to the Meta AI app to confirm your connection.</string>
+
+    <!-- Stream Screen -->
+    <string name="live_stream" description="Live Stream">Live stream</string>
+
+    <!-- Non Stream Screen -->
+    <string name="camera_access_icon_description" description="Camera Access icon description">Camera Access icon</string>
+    <string name="non_stream_screen_description" description="Non stream screen description">Tap the Start streaming button to stream video from your glasses or use the camera button to take a photo from your glasses.</string>
+    <string name="non_stream_screen_title" description="Non stream screen title">Stream Your Glasses Camera</string>
+    <string name="waiting_for_active_device" description="Waiting for active device message">Waiting for an active device</string>
+
+    <!-- SharePhotoDialog -->
+    <string name="photo_captured" description="Photo Captured">Photo Captured</string>
+    <string name ="captured_photo" description="Captured Photo">Captured Photo</string>
+    <string name ="capture_photo" description="Capture Photo">Capture Photo</string>
+    <string name="share" description="Share">Share</string>
+
+    <!-- Mock Device Kit Screen -->
+    <string name="mock_device_kit_title" description="Mock Device Kit Title">Mock Device Kit</string>
+    <string name="devices_paired_count" description="Number of devices paired"><xliff:g id="count">%1$d</xliff:g> device(s) paired</string>
+    <string name="mock_device_kit_description" description="Mock Device Kit Description">This screen handles simulating devices, mocking capabilities and states</string>
+    <string name="pair_rayban_meta" description="Pair RayBan Meta">Pair RayBan Meta</string>
+    <string name="unpair" description="Unpair">Unpair</string>
+    <string name="power_on" description="Power On">Power On</string>
+    <string name="power_off" description="Power Off">Power Off</string>
+    <string name="unfold" description="Unfold">Unfold</string>
+    <string name="fold" description="Fold">Fold</string>
+    <string name="don" description="Don">Don</string>
+    <string name="doff" description="Doff">Doff</string>
+    <string name="select_video" description="Select video">Select video</string>
+    <string name="has_camera_feed" description="Has camera feed">Has camera feed</string>
+    <string name="no_camera_feed" description="No camera feed">No camera feed</string>
+    <string name="select_image" description="Select image">Select image</string>
+    <string name="has_captured_image" description="Has captured image">Has captured image</string>
+    <string name="no_captured_image" description="No captured image">No captured image</string>
+
+    <!-- Getting Started Sheet -->
+    <string name="getting_started_title" description="Getting Started sheet title">Getting started</string>
+    <string name="getting_started_tip_permission" description="Tip about camera permission">First, Camera Access needs permission to use your glasses camera.</string>
+    <string name="getting_started_tip_led" description="Tip about capture LED">The capture LED lets others know when you\'re capturing content or going live.</string>
+    <string name="getting_started_tip_photo" description="Tip about photo capture">Capture photos by tapping the camera button.</string>
+    <string name="getting_started_continue" description="Continue button">Continue</string>
+</resources>
