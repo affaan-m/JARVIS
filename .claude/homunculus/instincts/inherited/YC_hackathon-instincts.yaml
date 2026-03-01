@@ -1,0 +1,624 @@
+# Instincts generated from https://github.com/affaan-m/YC_hackathon
+# Generated: 2026-03-01T03:49:27.549Z
+# Version: 2.0
+
+---
+id: YC_hackathon-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: feat, chore, test, docs, fix
+
+## Evidence
+
+- 25 commits analyzed
+- Detected conventional commit pattern
+- Examples: feat: add Laminar tracing spans and Browser Use v2 cloud config, chore: add untracked agent files and swarm scripts
+
+---
+id: YC_hackathon-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Commit Length
+
+## Action
+
+Write moderate-length commit messages (~50 characters)
+
+## Evidence
+
+- Average commit message length: 60 chars
+- Based on 25 commits
+
+---
+id: YC_hackathon-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: YC_hackathon-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: YC_hackathon-arch-type-based
+trigger: "when adding new code"
+confidence: 0.8
+domain: architecture
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Arch Type Based
+
+## Action
+
+Place code in the appropriate type folder (components/, services/, utils/, etc.)
+
+## Evidence
+
+- Type-based module organization detected
+- Folders: 
+
+---
+id: YC_hackathon-test-framework
+trigger: "when writing tests"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Test Framework
+
+## Action
+
+Use vitest as the test framework
+
+## Evidence
+
+- Test framework detected: vitest
+- File pattern: *.test.tsx
+
+---
+id: YC_hackathon-test-naming
+trigger: "when creating a test file"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Test Naming
+
+## Action
+
+Name test files using the pattern: *.test.tsx
+
+## Evidence
+
+- File pattern: *.test.tsx
+- Consistent across test files
+
+---
+id: YC_hackathon-test-mocking
+trigger: "when mocking dependencies in tests"
+confidence: 0.75
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Test Mocking
+
+## Action
+
+Use vi.mock for mocking
+
+## Evidence
+
+- Mocking pattern detected: vi.mock
+- Consistent across test files
+
+---
+id: YC_hackathon-test-types
+trigger: "when planning tests for a feature"
+confidence: 0.7
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Test Types
+
+## Action
+
+Write unit, e2e tests to match project standards
+
+## Evidence
+
+- Test types detected: unit, e2e
+- Coverage config: no
+
+---
+id: YC_hackathon-workflow-feature-development
+trigger: "when implementing a new feature"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Workflow Feature Development
+
+## Action
+
+Follow the feature-development workflow:
+1. Add feature implementation
+2. Add tests for feature
+3. Update documentation
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~25x per month
+- Files: frontend/convex/_generated/*, frontend/convex/*, frontend/*
+
+---
+id: YC_hackathon-workflow-add-new-agent
+trigger: "when doing add new agent"
+confidence: 0.65
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Workflow Add New Agent
+
+## Action
+
+Follow the add-new-agent workflow:
+1. Create new agent file in backend/agents/
+2. Update backend/agents/__init__.py to export agent
+3. Add agent to orchestrator.py fan-out pattern
+4. Add configuration keys to config.py if needed
+5. Write tests in backend/tests/test_agents.py
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~3x per month
+- Files: backend/agents/{agent_name}_agent.py, backend/agents/__init__.py, backend/agents/orchestrator.py
+
+---
+id: YC_hackathon-workflow-add-test-coverage
+trigger: "when doing add test coverage"
+confidence: 0.7
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Workflow Add Test Coverage
+
+## Action
+
+Follow the add-test-coverage workflow:
+1. Create test_{module}.py file in backend/tests/
+2. Add comprehensive fixtures and mocks
+3. Mock external API calls (httpx, service APIs)
+4. Ensure coverage thresholds are met
+5. Fix ruff/lint violations
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~4x per month
+- Files: backend/tests/test_{module}.py, backend/tests/test_adapters.py, backend/tests/test_clients.py
+
+---
+id: YC_hackathon-workflow-add-service-integration
+trigger: "when doing add service integration"
+confidence: 0.65
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Workflow Add Service Integration
+
+## Action
+
+Follow the add-service-integration workflow:
+1. Create Protocol interface in module/__init__.py
+2. Add Pydantic models in models.py
+3. Implement client class with Settings injection
+4. Add configuration to config.py
+5. Update .env.example with new keys
+6. Add comprehensive tests with mocking
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~3x per month
+- Files: backend/{module}/__init__.py, backend/{module}/models.py, backend/{module}/{service}_client.py
+
+---
+id: YC_hackathon-workflow-update-convex-schema
+trigger: "when doing update convex schema"
+confidence: 0.65
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Workflow Update Convex Schema
+
+## Action
+
+Follow the update-convex-schema workflow:
+1. Modify backend database operations
+2. Convex generates new type definitions
+3. Update frontend generated files automatically
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~3x per month
+- Files: frontend/convex/_generated/api.d.ts, frontend/convex/_generated/api.js, frontend/convex/_generated/dataModel.d.ts
+
+---
+id: YC_hackathon-workflow-add-frontend-component-tests
+trigger: "when doing add frontend component tests"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/affaan-m/YC_hackathon
+---
+
+# YC_hackathon Workflow Add Frontend Component Tests
+
+## Action
+
+Follow the add-frontend-component-tests workflow:
+1. Create __tests__ directory in components folder
+2. Write component test with React Testing Library
+3. Add data-testid attributes to components
+4. Mock external dependencies and hooks
+5. Update package.json if new test dependencies needed
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: frontend/src/components/__tests__/{Component}.test.tsx, frontend/src/components/{Component}.tsx, frontend/package.json
+
+---
+id: yc_hackathon-conventional-commits
+trigger: "When writing a commit message"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: affaan-m/YC_hackathon
+---
+
+# Yc_hackathon Conventional Commits
+
+## Action
+
+Use conventional commit format with prefixes: feat, chore, test, docs, fix, ci and keep message around 60 characters
+
+## Evidence
+
+- All 8 example commits follow conventional format
+- Average length exactly 60 chars
+- Consistent prefixes across all commits
+
+---
+id: yc_hackathon-snake-case-files
+trigger: "When creating a Python file"
+confidence: 0.85
+domain: code-style
+source: repo-analysis
+source_repo: affaan-m/YC_hackathon
+---
+
+# Yc_hackathon Snake Case Files
+
+## Action
+
+Name the file using snake_case convention
+
+## Evidence
+
+- Naming conventions show files: snake_case
+- Backend file structure follows this pattern
+
+---
+id: yc_hackathon-camel-case-functions
+trigger: "When defining a function in Python"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: affaan-m/YC_hackathon
+---
+
+# Yc_hackathon Camel Case Functions
+
+## Action
+
+Name the function using camelCase convention
+
+## Evidence
+
+- Code style analysis shows functions: camelCase
+- Consistent across Python modules
+
+---
+id: yc_hackathon-pascal-case-classes
+trigger: "When defining a class"
+confidence: 0.85
+domain: code-style
+source: repo-analysis
+source_repo: affaan-m/YC_hackathon
+---
+
+# Yc_hackathon Pascal Case Classes
+
+## Action
+
+Name the class using PascalCase convention
+
+## Evidence
+
+- Code style shows classes: PascalCase
+- Standard Python class naming pattern
+
+---
+id: yc_hackathon-screaming-snake-constants
+trigger: "When defining a constant"
+confidence: 0.85
+domain: code-style
+source: repo-analysis
+source_repo: affaan-m/YC_hackathon
+---
+
+# Yc_hackathon Screaming Snake Constants
+
+## Action
+
+Name the constant using SCREAMING_SNAKE_CASE convention
+
+## Evidence
+
+- Code style shows constants: SCREAMING_SNAKE_CASE
+- Standard Python constant naming
+
+---
+id: yc_hackathon-vitest-testing
+trigger: "When writing frontend tests"
+confidence: 0.88
+domain: testing
+source: repo-analysis
+source_repo: affaan-m/YC_hackathon
+---
+
+# Yc_hackathon Vitest Testing
+
+## Action
+
+Use vitest framework with *.test.tsx file pattern and vi.mock for mocking
+
+## Evidence
+
+- Testing framework: vitest
+- File pattern: *.test.tsx
+- Mocking style: vi.mock
+
+---
+id: yc_hackathon-try-catch-errors
+trigger: "When handling errors in code"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: affaan-m/YC_hackathon
+---
+
+# Yc_hackathon Try Catch Errors
+
+## Action
+
+Use try-catch blocks for error handling
+
+## Evidence
+
+- Error handling style: try-catch
+- No custom error classes or global handlers detected
+
+---
+id: yc_hackathon-new-agent-workflow
+trigger: "When adding a new research/intelligence gathering agent"
+confidence: 0.92
+domain: workflow
+source: repo-analysis
+source_repo: affaan-m/YC_hackathon
+---
+
+# Yc_hackathon New Agent Workflow
+
+## Action
+
+Create agent file in backend/agents/, update __init__.py, add to orchestrator.py, update config.py, write tests
+
+## Evidence
+
+- Workflow detected with 92% confidence
+- 3x/month frequency
+- Clear file pattern in backend/agents/
+
+---
+id: yc_hackathon-test-coverage-workflow
+trigger: "When expanding test coverage for new functionality"
+confidence: 0.88
+domain: workflow
+source: repo-analysis
+source_repo: affaan-m/YC_hackathon
+---
+
+# Yc_hackathon Test Coverage Workflow
+
+## Action
+
+Create test_{module}.py in backend/tests/, add fixtures and mocks, mock external APIs, ensure coverage thresholds
+
+## Evidence
+
+- Workflow detected with 88% confidence
+- 4x/month frequency
+- Pattern in backend/tests/ directory
+
+---
+id: yc_hackathon-service-integration-workflow
+trigger: "When integrating a new external service or API"
+confidence: 0.85
+domain: workflow
+source: repo-analysis
+source_repo: affaan-m/YC_hackathon
+---
+
+# Yc_hackathon Service Integration Workflow
+
+## Action
+
+Create Protocol interface, add Pydantic models, implement client with Settings injection, update config and .env.example
+
+## Evidence
+
+- Workflow detected with 85% confidence
+- 3x/month frequency
+- Protocol pattern in multiple modules
+
+---
+id: yc_hackathon-convex-schema-workflow
+trigger: "When database schema or Convex functions are modified"
+confidence: 0.81
+domain: workflow
+source: repo-analysis
+source_repo: affaan-m/YC_hackathon
+---
+
+# Yc_hackathon Convex Schema Workflow
+
+## Action
+
+Let Convex auto-generate type definitions in frontend/convex/_generated/ files
+
+## Evidence
+
+- Workflow detected with 81% confidence
+- Generated files pattern in frontend/convex/_generated/
+
+---
+id: yc_hackathon-component-test-workflow
+trigger: "When new frontend components need test coverage"
+confidence: 0.79
+domain: workflow
+source: repo-analysis
+source_repo: affaan-m/YC_hackathon
+---
+
+# Yc_hackathon Component Test Workflow
+
+## Action
+
+Create __tests__ directory, write tests with React Testing Library, add data-testid attributes, mock dependencies
+
+## Evidence
+
+- Workflow detected with 79% confidence
+- Testing Library pattern
+- Component test structure
+
+---
+id: yc_hackathon-backend-frontend-separation
+trigger: "When organizing project files"
+confidence: 0.9
+domain: architecture
+source: repo-analysis
+source_repo: affaan-m/YC_hackathon
+---
+
+# Yc_hackathon Backend Frontend Separation
+
+## Action
+
+Separate backend Python code and frontend TypeScript/React code into distinct folders
+
+## Evidence
+
+- Clear backend/ and frontend/ folder structure
+- Different languages and configs per folder
+
+---
+id: yc_hackathon-type-based-modules
+trigger: "When organizing code within modules"
+confidence: 0.75
+domain: architecture
+source: repo-analysis
+source_repo: affaan-m/YC_hackathon
+---
+
+# Yc_hackathon Type Based Modules
+
+## Action
+
+Use type-based organization (group by functionality rather than feature)
+
+## Evidence
+
+- Module organization: type-based
+- Agent pattern shows functional grouping
+
