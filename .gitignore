@@ -30,6 +30,12 @@ __pycache__/
 # Logs
 *.log
 
+# Model weights
+*.pt
+
+# Playwright MCP
+.playwright-mcp/
+
 # Local research and transcript artifacts
 output/
 conversasion.md
