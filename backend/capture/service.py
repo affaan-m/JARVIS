@@ -27,6 +27,7 @@ class CaptureService:
         self,
         file: UploadFile,
         source: str = "manual_upload",
+        person_name: str | None = None,
     ) -> CaptureQueuedResponse | dict:
         capture_id = f"cap_{uuid4().hex[:12]}"
         filename = file.filename or "upload.bin"
@@ -48,6 +49,7 @@ class CaptureService:
             data=data,
             content_type=content_type,
             source=source,
+            person_name=person_name,
         )
 
         return {

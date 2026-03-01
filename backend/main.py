@@ -135,5 +135,11 @@ async def tasks() -> list[TaskPhase]:
 
 
 @app.post("/api/capture")
-async def capture(file: UploadFile = upload_file, source: str = "manual_upload"):
-    return await capture_service.enqueue_upload(file=file, source=source)
+async def capture(
+    file: UploadFile = upload_file,
+    source: str = "manual_upload",
+    person_name: str | None = None,
+):
+    return await capture_service.enqueue_upload(
+        file=file, source=source, person_name=person_name,
+    )

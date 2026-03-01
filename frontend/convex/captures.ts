@@ -45,3 +45,47 @@ export const listRecent = query({
     return await ctx.db.query("captures").order("desc").take(20);
   },
 });
+
+// Backend-compatible generic store (upsert by capture_id field in data)
+export const store = mutation({
+  args: { data: v.any() },
+  handler: async (ctx, { data }) => {
+    const captureId = data.capture_id ?? `cap_${Date.now()}`;
+    const source = data.source ?? "manual_upload";
+    const status = data.status ?? "pending";
+
+    // Map to schema-compatible status
+    const validStatus = ["pending", "identifying", "identified", "failed"].includes(status)
+      ? status as "pending" | "identifying" | "identified" | "failed"
+      : "pending";
+
+    // Check if capture already exists by scanning recent captures
+    const existing = await ctx.db
+      .query("captures")
+      .order("desc")
+      .take(100);
+    const match = existing.find(
+      (c: Record<string, unknown>) => c.imageUrl === captureId
+    );
+
+    if (match) {
+      await ctx.db.patch(match._id, { status: validStatus });
+      return match._id;
+    }
+
+    const id = await ctx.db.insert("captures", {
+      imageUrl: captureId,
+      timestamp: Date.now(),
+      source,
+      status: validStatus,
+    });
+
+    await ctx.db.insert("activityLog", {
+      type: "capture",
+      message: `New capture via ${source}`,
+      timestamp: Date.now(),
+    });
+
+    return id;
+  },
+});
