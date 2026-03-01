@@ -19,6 +19,8 @@ interface CameraFeedProps {
 
 function RoomCodeInput({ onSubmit }: { onSubmit: (code: string) => void }) {
   const [code, setCode] = useState("");
+  const [hovered, setHovered] = useState(false);
+  const enabled = code.length === 6;
   return (
     <div style={{
       position: "absolute", bottom: 6, left: 8, right: 8,
@@ -39,15 +41,24 @@ function RoomCodeInput({ onSubmit }: { onSubmit: (code: string) => void }) {
         onKeyDown={e => { if (e.key === "Enter" && code.length === 6) onSubmit(code); }}
       />
       <button
-        onClick={() => code.length === 6 && onSubmit(code)}
-        disabled={code.length !== 6}
+        onClick={() => enabled && onSubmit(code)}
+        disabled={!enabled}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         style={{
           padding: "3px 8px",
-          background: code.length === 6 ? "rgba(74,124,63,.4)" : "rgba(0,0,0,.3)",
-          border: "1px solid rgba(120,180,80,.2)",
-          borderRadius: 2, color: "rgba(120,180,80,.6)",
+          background: enabled
+            ? hovered ? "rgba(74,124,63,.6)" : "rgba(74,124,63,.4)"
+            : "rgba(0,0,0,.3)",
+          border: `1px solid ${enabled && hovered ? "rgba(120,180,80,.4)" : "rgba(120,180,80,.2)"}`,
+          borderRadius: 2,
+          color: enabled
+            ? hovered ? "rgba(120,180,80,.85)" : "rgba(120,180,80,.6)"
+            : "rgba(120,180,80,.6)",
           fontSize: 8, fontFamily: "monospace", letterSpacing: ".1em",
-          cursor: code.length === 6 ? "pointer" : "default",
+          cursor: enabled ? "pointer" : "not-allowed",
+          transition: "background .15s, border-color .15s, color .15s",
+          boxShadow: enabled && hovered ? "0 0 8px rgba(120,180,80,.15)" : "none",
         }}
       >
         LINK

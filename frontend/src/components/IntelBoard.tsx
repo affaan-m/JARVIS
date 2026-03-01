@@ -59,7 +59,7 @@ import { TopBar } from "./TopBar";
  * ============================================================
  */
 
-const BW = 860, BH = 680, GW = 168, GH = 108, BDW = 220, BDH = 200, FR = 0, SIDE_W = 270;
+const BW = 1100, BH = 680, GW = 168, GH = 108, BDW = 220, BDH = 200, FR = 0, SIDE_W = 270;
 const ZM = [0.48, 1, 1.65];
 const CAM_W = 240, CAM_H = 150, CAM_PAD = 16;
 const CAM_ZONE = { x: BW - CAM_W - CAM_PAD - 10, y: CAM_PAD - 10, w: CAM_W + 30, h: CAM_H + 30 };
@@ -166,6 +166,31 @@ function inCamZone(x: number, y: number, w: number, h: number) {
   return !(x + w < CAM_ZONE.x || x > CAM_ZONE.x + CAM_ZONE.w || y + h < CAM_ZONE.y || y > CAM_ZONE.y + CAM_ZONE.h);
 }
 
+function clampOutOfCamZone(x: number, y: number, w: number, h: number) {
+  if (!inCamZone(x, y, w, h)) return { x, y };
+  // Find shortest escape: left, right, up, down
+  const escL = CAM_ZONE.x - (x + w);       // push left so card's right edge clears zone left
+  const escR = (CAM_ZONE.x + CAM_ZONE.w) - x; // push right so card's left edge clears zone right
+  const escU = CAM_ZONE.y - (y + h);        // push up so card's bottom clears zone top
+  const escD = (CAM_ZONE.y + CAM_ZONE.h) - y;  // push down so card's top clears zone bottom
+  const moves: { dx: number; dy: number; dist: number }[] = [
+    { dx: escL, dy: 0, dist: Math.abs(escL) },
+    { dx: escR, dy: 0, dist: Math.abs(escR) },
+    { dx: 0, dy: escU, dist: Math.abs(escU) },
+    { dx: 0, dy: escD, dist: Math.abs(escD) },
+  ];
+  // Filter out moves that push outside board bounds
+  const valid = moves.filter(m => {
+    const nx = x + m.dx, ny = y + m.dy;
+    return nx >= 0 && nx + w <= BW && ny >= 0 && ny + h <= BH;
+  });
+  const best = (valid.length ? valid : moves).sort((a, b) => a.dist - b.dist)[0];
+  return {
+    x: Math.max(0, Math.min(BW - w, x + best.dx)),
+    y: Math.max(0, Math.min(BH - h, y + best.dy)),
+  };
+}
+
 interface PositionedSource extends IntelSource {
   id: string;
   x: number;
@@ -188,7 +213,9 @@ function randPos(ex: PositionedSource[], bp: { x: number; y: number } | null) {
     for (const d of ex) if (Math.abs(d.x - x) < GW + 12 && Math.abs(d.y - y) < GH + 12) { ok = false; break; }
     if (ok) return { x, y };
   }
-  return { x: m + Math.random() * (BW - GW - m * 2), y: 180 + Math.random() * (BH - GH - 220) };
+  const fx = m + Math.random() * (BW - GW - m * 2), fy = 180 + Math.random() * (BH - GH - 220);
+  if (inCamZone(fx, fy, GW, GH)) return { x: Math.min(fx, CAM_ZONE.x - GW - 10), y: fy };
+  return { x: fx, y: fy };
 }
 
 function genCurl(): CurlDef | null {
@@ -278,19 +305,19 @@ export default function IntelBoard() {
       if (!d.moved && Math.hypot(mx, my) < 4) return;
       if (!d.moved) { d.moved = true; setDragId(d.id); }
       if (d.id === "blue") {
-        setBoardData(prev => ({
-          ...prev, blu: {
-            x: Math.max(0, Math.min(BW - BDW, d.dx + mx)),
-            y: Math.max(0, Math.min(BH - BDH, d.dy + my)),
-          },
-        }));
+        const cx = Math.max(0, Math.min(BW - BDW, d.dx + mx));
+        const cy = Math.max(0, Math.min(BH - BDH, d.dy + my));
+        const clamped = clampOutOfCamZone(cx, cy, BDW, BDH);
+        setBoardData(prev => ({ ...prev, blu: clamped }));
       } else {
         setBoardData(prev => ({
-          ...prev, srcs: prev.srcs.map(s => s.id === d.id ? {
-            ...s,
-            x: Math.max(0, Math.min(BW - GW, d.dx + mx)),
-            y: Math.max(0, Math.min(BH - GH, d.dy + my)),
-          } : s),
+          ...prev, srcs: prev.srcs.map(s => {
+            if (s.id !== d.id) return s;
+            const cx = Math.max(0, Math.min(BW - GW, d.dx + mx));
+            const cy = Math.max(0, Math.min(BH - GH, d.dy + my));
+            const clamped = clampOutOfCamZone(cx, cy, GW, GH);
+            return { ...s, x: clamped.x, y: clamped.y };
+          }),
         }));
       }
     };
