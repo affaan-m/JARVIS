@@ -172,6 +172,8 @@ let sigWs = null;
 let pc = null;
 let webcamStream = null;
 let pendingFrame = false;    // Flow control: true while waiting for server response
+let glassesActive = false;   // True while glasses mode is intentionally connected
+let glassesRoom = '';        // Room code for auto-reconnect
 
 // FPS tracking
 let fpsFrames = 0;
@@ -225,9 +227,15 @@ function ensureWS() {
       reject(e);
     };
     ws.onclose = () => {
-      console.log('[WS] Disconnected');
+      console.log('[WS] Disconnected — will auto-reconnect in 2s');
       ws = null;
       pendingFrame = false;
+      setTimeout(() => {
+        if (source === 'glasses' && glassesActive || source === 'webcam' && webcamStream) {
+          console.log('[WS] Auto-reconnecting...');
+          ensureWS().catch(e => console.warn('[WS] Reconnect failed:', e));
+        }
+      }, 2000);
     };
     ws.onmessage = (evt) => {
       const result = JSON.parse(evt.data);
@@ -391,9 +399,22 @@ requestAnimationFrame(drawOverlay);
 // ---------------------------------------------------------------------------
 // Glasses mode: VisionClaw WebRTC signaling
 // ---------------------------------------------------------------------------
+// Cleanup WebRTC + signaling without resetting UI (used before reconnect)
+function cleanupGlassesConnection() {
+  if (pc) { try { pc.close(); } catch(e) {} pc = null; }
+  if (sigWs) {
+    const old = sigWs;
+    sigWs = null;
+    old.onclose = null; // prevent triggering reconnect loop
+    old.close();
+  }
+}
+
 async function connectGlasses() {
-  const room = document.getElementById('roomCode').value.trim();
+  const room = glassesRoom || document.getElementById('roomCode').value.trim();
   if (!room) { alert('Enter a room code'); return; }
+  glassesRoom = room;
+  glassesActive = true;
 
   const btnConnect = document.getElementById('btnConnect');
   btnConnect.disabled = true;
@@ -471,9 +492,22 @@ async function connectGlasses() {
       }
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         console.log('[WebRTC] ICE connected — video stream should be flowing');
+        setStatus('connected', 'Glasses connected — streaming');
       }
-      if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-        setStatus('error', 'WebRTC disconnected');
+      if (pc.iceConnectionState === 'disconnected') {
+        console.warn('[WebRTC] ICE disconnected — attempting ICE restart...');
+        setStatus('connecting', 'Reconnecting (ICE restart)...');
+        try { pc.restartIce(); } catch (e) { console.warn('[WebRTC] ICE restart failed:', e); }
+      }
+      if (pc.iceConnectionState === 'failed') {
+        console.error('[WebRTC] ICE failed — full reconnect in 3s');
+        setStatus('connecting', 'Reconnecting...');
+        setTimeout(() => {
+          if (glassesActive && glassesRoom) {
+            cleanupGlassesConnection();
+            connectGlasses();
+          }
+        }, 3000);
       }
     };
 
@@ -518,8 +552,9 @@ async function connectGlasses() {
           break;
 
         case 'peer_left':
-          console.log('[Signal] Glasses disconnected');
-          setStatus('error', 'Glasses disconnected');
+          console.log('[Signal] Glasses peer left — waiting for rejoin...');
+          setStatus('connecting', 'Glasses disconnected — waiting for rejoin...');
+          // Don't full-reconnect; glasses may rejoin the same room
           break;
 
         case 'error':
@@ -538,7 +573,26 @@ async function connectGlasses() {
     };
     sigWs.onclose = () => {
       console.log('[Signal] Disconnected');
+      if (glassesActive && glassesRoom) {
+        console.log('[Signal] Auto-reconnecting in 3s...');
+        setStatus('connecting', 'Signal lost — reconnecting...');
+        setTimeout(() => {
+          if (glassesActive && glassesRoom) {
+            cleanupGlassesConnection();
+            connectGlasses();
+          }
+        }, 3000);
+      }
     };
+
+    // Signaling keepalive — send ping every 30s to prevent idle timeout
+    const sigPing = setInterval(() => {
+      if (sigWs && sigWs.readyState === WebSocket.OPEN) {
+        sigWs.send(JSON.stringify({ type: 'ping' }));
+      } else {
+        clearInterval(sigPing);
+      }
+    }, 30000);
 
   } catch (err) {
     console.error('[Connect]', err);
@@ -548,12 +602,9 @@ async function connectGlasses() {
 }
 
 function disconnectGlasses() {
-  if (pc) { pc.close(); pc = null; }
-  if (sigWs) {
-    sigWs.onclose = null;
-    sigWs.close();
-    sigWs = null;
-  }
+  glassesActive = false;
+  glassesRoom = '';
+  cleanupGlassesConnection();
   liveVideo.srcObject = null;
   prevBoxes = [];
   targetBoxes = [];
