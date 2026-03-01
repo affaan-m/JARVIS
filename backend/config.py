@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = Field(default=None, alias="GEMINI_API_KEY")
     laminar_api_key: str | None = Field(default=None, alias="LAMINAR_API_KEY")
     telegram_bot_token: str | None = Field(default=None, alias="TELEGRAM_BOT_TOKEN")
+    hibp_api_key: str | None = Field(default=None, alias="HIBP_API_KEY")
     pimeyes_account_pool: str = Field(default="[]", alias="PIMEYES_ACCOUNT_POOL")
 
     def service_flags(self) -> dict[str, bool]:
@@ -39,6 +40,7 @@ class Settings(BaseSettings):
             "gemini": bool(self.gemini_api_key),
             "laminar": bool(self.laminar_api_key),
             "telegram": bool(self.telegram_bot_token),
+            "hibp": bool(self.hibp_api_key),
             "pimeyes_pool": self.pimeyes_account_pool not in {"", "[]"},
         }
 
