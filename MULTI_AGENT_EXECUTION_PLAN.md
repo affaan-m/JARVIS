@@ -1,4 +1,4 @@
-# SPECTER Multi-Agent Execution Plan
+# JARVIS Multi-Agent Execution Plan
 
 ## Purpose
 

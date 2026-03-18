@@ -20,7 +20,7 @@ from agents.cloud_skills import CloudSkillRunner
 from config import Settings
 
 # Default password for all agent-created accounts
-AGENT_PASSWORD = "Specter2026!Ag3nt"
+AGENT_PASSWORD = "Jarvis2026!Ag3nt"
 
 # Where we persist created credentials
 CREDENTIALS_FILE = Path(__file__).parent.parent / "agent_credentials.json"
@@ -119,7 +119,7 @@ class AccountManager:
         platform: str,
         signup_url: str,
         *,
-        person_name: str = "Specter Agent",
+        person_name: str = "Jarvis Agent",
         timeout: float = 90.0,
     ) -> dict | None:
         """Ensure we have an account on the platform.

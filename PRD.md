@@ -1,4 +1,4 @@
-# Product Requirements Document: SPECTER
+# Product Requirements Document: JARVIS
 ## Real-Time Person Intelligence Platform
 
 **Version:** 0.1 | **Date:** 2026-02-27 | **Hackathon:** Web Agents Hackathon (Browser Use + YC)
@@ -16,7 +16,7 @@ At events, conferences, and networking situations, you meet dozens of people but
 
 ## 3. Solution
 
-SPECTER uses Meta Ray-Ban glasses to capture photos of people. A facial recognition pipeline identifies them, then a swarm of autonomous browser agents (powered by Browser Use) deep-researches each person across LinkedIn, X/Twitter, Instagram, Facebook, public records, and more. Results stream into a COD-style mission briefing corkboard where each person appears as a dossier with connections drawn between individuals.
+JARVIS uses Meta Ray-Ban glasses to capture photos of people. A facial recognition pipeline identifies them, then a swarm of autonomous browser agents (powered by Browser Use) deep-researches each person across LinkedIn, X/Twitter, Instagram, Facebook, public records, and more. Results stream into a COD-style mission briefing corkboard where each person appears as a dossier with connections drawn between individuals.
 
 ## 4. Target User
 

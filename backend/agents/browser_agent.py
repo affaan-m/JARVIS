@@ -23,7 +23,7 @@ from config import Settings
 from observability.laminar import traced
 
 DEFAULT_TIMEOUT_SECONDS = 90.0
-SIGNUP_PASSWORD = "Specter2026!"
+SIGNUP_PASSWORD = "Jarvis2026!"
 
 
 class BaseBrowserAgent(ABC):
@@ -171,7 +171,7 @@ class BaseBrowserAgent(ABC):
             return None
 
         try:
-            inbox = client.create_inbox(label=f"specter-{self.agent_name}")
+            inbox = client.create_inbox(label=f"jarvis-{self.agent_name}")
             self._signup_email = inbox["email"]
             logger.info("agent={} signup_email={} (on-demand)", self.agent_name, self._signup_email)
             return self._signup_email

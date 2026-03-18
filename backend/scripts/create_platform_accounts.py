@@ -30,7 +30,7 @@ from loguru import logger
 
 from config import get_settings
 
-ACCOUNTS_DIR = Path(os.path.expanduser("~/.specter"))
+ACCOUNTS_DIR = Path(os.path.expanduser("~/.jarvis"))
 ACCOUNTS_FILE = ACCOUNTS_DIR / "accounts.json"
 
 PLATFORMS = {
@@ -364,7 +364,7 @@ async def create_account_for_platform(
         }
 
     # Create AgentMail inbox
-    inbox = mail_client.create_inbox(label=f"specter-{platform}")
+    inbox = mail_client.create_inbox(label=f"jarvis-{platform}")
     email = inbox["email"]
     inbox_id = inbox["inbox_id"]
     logger.info("{}: created inbox email={}", platform, email)
@@ -383,7 +383,7 @@ async def create_account_for_platform(
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Create platform accounts for SPECTER demo")
+    parser = argparse.ArgumentParser(description="Create platform accounts for JARVIS demo")
     parser.add_argument(
         "--platforms",
         type=str,

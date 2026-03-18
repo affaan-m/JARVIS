@@ -4,7 +4,7 @@ This file makes Codex behave consistently with the existing Claude project rules
 
 ## Project
 
-SPECTER is a real-time person intelligence platform for the Browser Use + YC web agents hackathon:
+JARVIS is a real-time person intelligence platform for the Browser Use + YC web agents hackathon:
 
 - Meta glasses or phone camera input
 - Face detection and identification

@@ -1,4 +1,4 @@
-"""Telegram bot capture channel for SPECTER.
+"""Telegram bot capture channel for JARVIS.
 
 Receives photos via Telegram, downloads them, and feeds them into the pipeline.
 Gracefully disabled when TELEGRAM_BOT_TOKEN is not configured.
@@ -61,7 +61,7 @@ class TelegramCaptureBot:
     async def _handle_start(update: Update, _context: object) -> None:
         if update.effective_message:
             await update.effective_message.reply_text(
-                "SPECTER capture bot ready. Send a photo to analyze."
+                "JARVIS capture bot ready. Send a photo to analyze."
             )
 
     async def _handle_photo(self, update: Update, _context: object) -> None:

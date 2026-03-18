@@ -3,9 +3,9 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "specter-backend"
+name = "jarvis-backend"
 version = "0.1.0"
-description = "FastAPI control plane for the SPECTER YC hackathon project"
+description = "FastAPI control plane for the JARVIS YC hackathon project"
 requires-python = ">=3.11"
 dependencies = [
   "agentmail>=0.2.22",

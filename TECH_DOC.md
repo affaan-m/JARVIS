@@ -1,4 +1,4 @@
-# Technical Documentation: SPECTER
+# Technical Documentation: JARVIS
 ## Developer Onboarding & Implementation Guide
 
 **Version:** 0.1 | **Date:** 2026-02-27
@@ -20,7 +20,7 @@
 
 ### Project Structure
 ```
-specter/
+jarvis/
 ├── backend/                    # Python FastAPI
 │   ├── main.py                # Entry point, FastAPI app
 │   ├── capture/               # Photo capture & processing
@@ -366,18 +366,18 @@ SUPERMEMORY_API_KEY=
 about everyone in it?"
 
 [0:15-0:30] SHOW THE GLASSES
-Put on Meta glasses. "These glasses are running SPECTER."
+Put on Meta glasses. "These glasses are running JARVIS."
 
 [0:30-1:30] LIVE DEMO — CAPTURE
 Look at person 1. "I just looked at them. Watch what happens."
 Cut to corkboard. Paper spawns in. Name appears. Data starts streaming.
-"In real-time, SPECTER deployed 6 browser agents to research this
+"In real-time, JARVIS deployed 6 browser agents to research this
 person across LinkedIn, X, Instagram, and the open web."
 
 [1:30-2:15] LIVE DEMO — DEPTH
 Click on the dossier. Show the detail. "Here's their full profile —
 work history, education, social activity, and even conversation hooks.
-SPECTER tells me to ask them about their recent Series B."
+JARVIS tells me to ask them about their recent Series B."
 Look at person 2. Second paper spawns. Connection string draws.
 "And it found they used to work together at Google."
 
@@ -388,7 +388,7 @@ streaming, Laminar for accuracy verification. All orchestrated by a
 Python swarm coordinator."
 
 [2:45-3:00] CLOSE
-"SPECTER turns any room into an intelligence briefing.
+"JARVIS turns any room into an intelligence briefing.
 The future of networking isn't small talk — it's information."
 
 [3:00-4:00] Q&A

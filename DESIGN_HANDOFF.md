@@ -1,4 +1,4 @@
-# SPECTER — Design Handoff: Frontend / UX / Visual
+# JARVIS — Design Handoff: Frontend / UX / Visual
 ## For Frontend Coding Agent Handoff
 
 **Version:** 0.1 | **Date:** 2026-02-28 | **Status:** READY TO BUILD
@@ -7,7 +7,7 @@
 
 ## 0. Design Philosophy
 
-SPECTER's UI is a **Call of Duty: Black Ops mission briefing war room**. Think the evidence board from Black Ops Cold War's safehouse — green-tinted fluorescent lighting, brick walls, military filing cabinets, classified documents pinned to a board with red string connecting targets. NOT a cozy Pinterest corkboard — this is a military intelligence operation.
+JARVIS's UI is a **Call of Duty: Black Ops mission briefing war room**. Think the evidence board from Black Ops Cold War's safehouse — green-tinted fluorescent lighting, brick walls, military filing cabinets, classified documents pinned to a board with red string connecting targets. NOT a cozy Pinterest corkboard — this is a military intelligence operation.
 
 **Primary visual reference:** COD Black Ops Cold War "Evidence Board" — green military tint over everything, harsh fluorescent overhead lighting, brick/concrete walls, metal shelving with file boxes, photos and documents pinned with red string, maps with location markers, analog + classified aesthetic.
 
@@ -88,7 +88,7 @@ Google Fonts to load: `Courier+Prime`, `Bebas+Neue`, `Inter`
 ┌──────────────────────────────────────────────────────────────┐
 │ TOP BAR (fixed, 48px)                                         │
 │ ┌─────────┬────────────────────────────┬──────────┬─────────┐│
-│ │ SPECTER │ [status indicator: agents]  │ [clock]  │ [•••]  ││
+│ │ JARVIS │ [status indicator: agents]  │ [clock]  │ [•••]  ││
 │ │ logo    │ "4 agents active"           │ 14:32:07 │ menu   ││
 │ └─────────┴────────────────────────────┴──────────┴─────────┘│
 ├──────────────────────────────────────────────┬───────────────┤
@@ -272,11 +272,11 @@ Real-time activity stream. Each event is a small card:
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ 👁 SPECTER    ▓▓▓░░ 4 agents active    14:32:07   [⚙️]   │
+│ 👁 JARVIS    ▓▓▓░░ 4 agents active    14:32:07   [⚙️]   │
 └────────────────────────────────────────────────────────────┘
 ```
 
-- Logo: eye icon + "SPECTER" in Bebas Neue, letter-spaced
+- Logo: eye icon + "JARVIS" in Bebas Neue, letter-spaced
 - Agent status: mini progress bars or activity dots
 - Clock: monospace, updating every second (military time)
 - Settings gear: opens config modal (API keys, etc.) — low priority
@@ -421,7 +421,7 @@ const liveFeed = useQuery(api.intel.recentActivity, { limit: 50 });
 | Cork texture | Free stock / Unsplash | JPG, 2048x2048, seamless | Tileable background |
 | Pushpin | SVG or CSS | SVG preferred | Red + yellow variants |
 | Paper texture | CSS or PNG | Optional overlay | Subtle fiber/grain |
-| Eye logo | SVG | Inline SVG | Simple eye icon for SPECTER brand |
+| Eye logo | SVG | Inline SVG | Simple eye icon for JARVIS brand |
 | Torn paper edge | CSS or SVG mask | Bottom of cards | clip-path or mask-image |
 
 ### Fonts (Google Fonts CDN)

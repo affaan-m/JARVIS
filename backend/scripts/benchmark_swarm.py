@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark harness for SPECTER research swarm.
+"""Benchmark harness for JARVIS research swarm.
 
 Runs Exa enrichment AND orchestrator swarm in parallel for each person,
 collects per-agent timing/status/counts, and outputs a rich formatted table.

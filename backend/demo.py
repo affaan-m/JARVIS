@@ -2,7 +2,7 @@
 # DECISION: Using rich Console + Panel + Table for impressive live demo output
 # ALT: Plain print + ANSI codes (simpler but less visually impressive for judges)
 """
-SPECTER Live Demo Script
+JARVIS Live Demo Script
 ========================
 
 Runs the full pipeline end-to-end with live stage-by-stage output.
@@ -204,13 +204,13 @@ def render_dossier(dossier: DossierReport, person_name: str) -> None:
 # ---------------------------------------------------------------------------
 
 async def run_demo(person_name: str, image_path: str | None = None) -> None:
-    """Execute the full SPECTER pipeline with live output."""
+    """Execute the full JARVIS pipeline with live output."""
     total_start = time.monotonic()
     settings = get_settings()
     total_stages = 6
 
     console.print(Panel(
-        f"[bold white]SPECTER[/bold white] — Real-Time Person Intelligence\n"
+        f"[bold white]JARVIS[/bold white] — Real-Time Person Intelligence\n"
         f"Subject: [bold cyan]{person_name}[/bold cyan]",
         border_style="bright_blue",
     ))
@@ -324,7 +324,7 @@ async def run_demo(person_name: str, image_path: str | None = None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="SPECTER Live Demo — full pipeline with live output",
+        description="JARVIS Live Demo — full pipeline with live output",
     )
     parser.add_argument(
         "--name", type=str, default="Sam Altman",

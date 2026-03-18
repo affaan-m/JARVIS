@@ -42,7 +42,7 @@ TASK_PHASES: list[TaskPhase] = [
                 "area": "frontend",
                 "status": "done",
                 "acceptance": (
-                    "Next.js app renders the SPECTER war-room shell with fonts, "
+                    "Next.js app renders the JARVIS war-room shell with fonts, "
                     "layout, and local demo data."
                 ),
                 "notes": (

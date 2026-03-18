@@ -113,7 +113,7 @@ class DarkwebAgent(BaseBrowserAgent):
                 f"{HIBP_BASE_URL}/breachedaccount/{email}",
                 headers={
                     "hibp-api-key": self._settings.hibp_api_key,
-                    "user-agent": "SPECTER-Research-Agent",
+                    "user-agent": "JARVIS-Research-Agent",
                 },
                 params={"truncateResponse": "false"},
             )

@@ -792,7 +792,7 @@ class DeepResearcher:
                 if not signup_url:
                     continue
                 creds = await self._accounts.ensure_account(
-                    domain, signup_url, person_name="Specter Agent"
+                    domain, signup_url, person_name="Jarvis Agent"
                 )
 
             if not creds:

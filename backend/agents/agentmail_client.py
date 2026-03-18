@@ -49,7 +49,7 @@ class AgentMailClient:
         from agentmail.inboxes import CreateInboxRequest
 
         client = self._get_client()
-        display = f"specter-{label}" if label else "specter-agent"
+        display = f"jarvis-{label}" if label else "jarvis-agent"
         inbox = client.inboxes.create(
             request=CreateInboxRequest(display_name=display),
         )

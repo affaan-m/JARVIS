@@ -1,4 +1,4 @@
-# System Architecture: SPECTER
+# System Architecture: JARVIS
 ## Real-Time Person Intelligence Platform
 
 **Version:** 0.1 | **Date:** 2026-02-27
@@ -9,7 +9,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        SPECTER ARCHITECTURE                        │
+│                        JARVIS ARCHITECTURE                        │
 │                                                                     │
 │  ┌──────────┐    ┌──────────────┐    ┌───────────────────────────┐ │
 │  │  META     │───▶│  CAPTURE     │───▶│    IDENTIFICATION         │ │

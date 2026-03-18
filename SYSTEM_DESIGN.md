@@ -1,4 +1,4 @@
-# SPECTER — Detailed System Design & Implementation Manual
+# JARVIS — Detailed System Design & Implementation Manual
 ## For Coding Agent Handoff
 
 **Version:** 0.3 | **Date:** 2026-02-28 | **Status:** READY TO BUILD
@@ -868,7 +868,7 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 
-app = FastAPI(title="SPECTER API", version="0.1.0")
+app = FastAPI(title="JARVIS API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -936,7 +936,7 @@ async def get_person(person_id: str):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "specter"}
+    return {"status": "ok", "service": "jarvis"}
 ```
 
 ---
@@ -1048,7 +1048,7 @@ config = Settings()
 ## 9. AMBIENT INTELLIGENCE LAYER (Module: `backend/ambient/`)
 
 ### 9.1 Overview
-Beyond face-based identification, SPECTER collects passive signals from the physical environment to enrich profiles and demonstrate depth. This layer runs on commodity hardware ($100 total) deployed at the hackathon venue.
+Beyond face-based identification, JARVIS collects passive signals from the physical environment to enrich profiles and demonstrate depth. This layer runs on commodity hardware ($100 total) deployed at the hackathon venue.
 
 ### 9.2 WiFi Probe Request Sniffing
 

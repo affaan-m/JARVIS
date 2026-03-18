@@ -1,7 +1,7 @@
-# SPECTER — Project Rules & Agent Instructions
+# JARVIS — Project Rules & Agent Instructions
 
 ## Project Overview
-SPECTER is a real-time person intelligence platform for the Web Agents Hackathon (Browser Use + YC).
+JARVIS is a real-time person intelligence platform for the Web Agents Hackathon (Browser Use + YC).
 Glasses camera → facial recognition → browser agent swarm → social enrichment → corkboard UI.
 
 ---

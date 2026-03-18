@@ -8,7 +8,7 @@ from config import Settings
 
 def test_settings_defaults() -> None:
     s = Settings()
-    assert s.app_name == "SPECTER API"
+    assert s.app_name == "JARVIS API"
     assert s.environment == "development"
     assert s.log_level == "INFO"
     assert s.frontend_origin == "http://localhost:3000"

@@ -6652,7 +6652,7 @@ wheels = [
 ]
 
 [[package]]
-name = "specter-backend"
+name = "jarvis-backend"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

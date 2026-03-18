@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────
-# SPECTER Agent Swarm Launcher
+# JARVIS Agent Swarm Launcher
 # Creates git worktrees + tmux session with parallel Claude agents
 # ─────────────────────────────────────────────────────────────
 
 REPO_ROOT="/Users/affoon/Documents/GitHub/YC_hackathon"
 WORKTREE_BASE="${REPO_ROOT}/.claude/worktrees"
-SESSION="specter-swarm"
+SESSION="jarvis-swarm"
 
 # Colors
 RED='\033[0;31m'
@@ -270,14 +270,14 @@ tmux send-keys -t "${SESSION}:frontend-logs" \
 log "Creating dashboard overview..."
 tmux new-window -t "$SESSION" -n "dashboard" -c "$REPO_ROOT"
 tmux send-keys -t "${SESSION}:dashboard" \
-  "watch -n 10 'echo \"========== SPECTER SWARM DASHBOARD ==========\"; echo; git worktree list; echo; echo \"--- Branch Status ---\"; for b in codex/backend-tests-coverage codex/frontend-test-harness codex/convex-proof-of-life codex/adapter-contracts; do commits=\$(git log \$b --oneline 2>/dev/null | head -5); if [ -n \"\$commits\" ]; then echo \"[\$b]\"; echo \"\$commits\"; else echo \"[\$b] (no new commits)\"; fi; echo; done; echo \"========================================\"'" Enter
+  "watch -n 10 'echo \"========== JARVIS SWARM DASHBOARD ==========\"; echo; git worktree list; echo; echo \"--- Branch Status ---\"; for b in codex/backend-tests-coverage codex/frontend-test-harness codex/convex-proof-of-life codex/adapter-contracts; do commits=\$(git log \$b --oneline 2>/dev/null | head -5); if [ -n \"\$commits\" ]; then echo \"[\$b]\"; echo \"\$commits\"; else echo \"[\$b] (no new commits)\"; fi; echo; done; echo \"========================================\"'" Enter
 
 # ─────────────────────────────────────────────────────────────
 # Done
 # ─────────────────────────────────────────────────────────────
 echo ""
 echo -e "${CYAN}════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  SPECTER Agent Swarm is LIVE${NC}"
+echo -e "${GREEN}  JARVIS Agent Swarm is LIVE${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════${NC}"
 echo ""
 echo -e "  Session:    ${YELLOW}${SESSION}${NC}"

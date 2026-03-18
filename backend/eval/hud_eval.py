@@ -2,7 +2,7 @@
 # DECISION: Custom eval harness using HUD Environment + scenarios for pipeline quality
 # ALT: Pure pytest scoring — simpler but no HUD platform integration or A/B testing
 """
-SPECTER Pipeline Eval Harness
+JARVIS Pipeline Eval Harness
 =============================
 
 Evaluates dossier output quality across three axes:
@@ -105,7 +105,7 @@ async def score_accuracy(dossier: DossierReport, timeout: float = 10.0) -> tuple
     async with httpx.AsyncClient(
         follow_redirects=True,
         timeout=timeout,
-        headers={"User-Agent": "SPECTER-Eval/1.0"},
+        headers={"User-Agent": "JARVIS-Eval/1.0"},
     ) as client:
         for label, url in urls.items():
             try:
@@ -357,7 +357,7 @@ async def run_pipeline_for_subject(
 try:
     from hud import Environment
 
-    env = Environment("specter-eval")
+    env = Environment("jarvis-eval")
 
     @env.tool()
     def get_test_subjects() -> list[dict[str, str]]:
@@ -557,7 +557,7 @@ def _print_summary(results: list[EvalScores]) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="SPECTER Pipeline Eval Harness")
+    parser = argparse.ArgumentParser(description="JARVIS Pipeline Eval Harness")
     parser.add_argument("--name", type=str, help="Evaluate a single person by name")
     parser.add_argument(
         "--hud", action="store_true",

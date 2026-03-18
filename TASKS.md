@@ -1,4 +1,4 @@
-# SPECTER — Build Tasks
+# JARVIS — Build Tasks
 ## Ordered by critical path. Check off as you go.
 
 ---
@@ -163,7 +163,7 @@
 
 - [ ] **T21: TopBar + StatusBar**
   - Create `components/TopBar.tsx` and `components/StatusBar.tsx`
-  - SPECTER logo, agent status indicators, military clock
+  - JARVIS logo, agent status indicators, military clock
   - Bottom bar with system status counts
   - **Acceptance:** UI chrome looks polished and shows live status
 

@@ -1,4 +1,4 @@
-"""Webhook capture endpoints for SPECTER.
+"""Webhook capture endpoints for JARVIS.
 
 Provides two routes:
   POST /api/capture/webhook — accepts base64-encoded image payloads

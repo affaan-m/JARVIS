@@ -71,7 +71,7 @@ def main():
             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2,
         )
 
-        cv2.imshow("SPECTER - Human Detection", frame)
+        cv2.imshow("JARVIS - Human Detection", frame)
 
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break

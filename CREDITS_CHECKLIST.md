@@ -1,4 +1,4 @@
-# Sponsor Credits Claim Checklist — SPECTER
+# Sponsor Credits Claim Checklist — JARVIS
 ## Blitz through these in order. ~10 minutes total.
 
 ### Priority 1: Code-Based (Just enter a code — fastest)

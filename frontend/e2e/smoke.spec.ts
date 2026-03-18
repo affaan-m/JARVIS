@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
 
-test.describe("SPECTER Smoke Test", () => {
+test.describe("JARVIS Smoke Test", () => {
   test("renders corkboard with person cards, opens and closes dossier, and shows live feed", async ({ page }) => {
     await page.goto("/");
 
     // 1. Verify the app shell renders
-    await expect(page.getByTestId("specter-app")).toBeVisible();
+    await expect(page.getByTestId("jarvis-app")).toBeVisible();
 
     // 2. Verify the Corkboard container renders
     await expect(page.getByTestId("corkboard-container")).toBeVisible();

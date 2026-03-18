@@ -16,8 +16,8 @@ from loguru import logger
 _BASE_V3 = "https://api.supermemory.ai/v3"
 _BASE_V4 = "https://api.supermemory.ai/v4"
 
-# Container tag used to namespace all SPECTER dossiers in SuperMemory.
-_CONTAINER_TAG = "specter-dossiers"
+# Container tag used to namespace all JARVIS dossiers in SuperMemory.
+_CONTAINER_TAG = "jarvis-dossiers"
 
 # Default timeout for SuperMemory API calls (seconds).
 _TIMEOUT = 30
@@ -65,7 +65,7 @@ class SuperMemoryClient:
             "customId": _custom_id(person_name),
             "metadata": {
                 "person_name": person_name,
-                "source": "specter-pipeline",
+                "source": "jarvis-pipeline",
             },
         }
         try:
@@ -101,7 +101,7 @@ class SuperMemoryClient:
             "threshold": 0.6,
             "filters": {
                 "AND": [
-                    {"key": "source", "value": "specter-pipeline"},
+                    {"key": "source", "value": "jarvis-pipeline"},
                 ],
             },
         }
@@ -153,7 +153,7 @@ class SuperMemoryClient:
 
 def _custom_id(person_name: str) -> str:
     """Deterministic document id so re-storing the same person overwrites."""
-    return f"specter-{person_name.strip().lower().replace(' ', '-')}"
+    return f"jarvis-{person_name.strip().lower().replace(' ', '-')}"
 
 
 def _parse_dossier(raw: str, name: str) -> dict[str, Any] | None:
