@@ -57,10 +57,18 @@ class Detection(BaseModel):
     track_id: int | None = None
 
 
+class Identification(BaseModel):
+    track_id: int
+    status: str  # "identifying" | "identified" | "failed"
+    name: str | None = None
+    person_id: str | None = None
+
+
 class FrameProcessedResponse(BaseModel):
     capture_id: str
     detections: list[Detection]
     new_persons: int
+    identifications: list[Identification] = Field(default_factory=list)
     timestamp: int
     source: str
 

@@ -9,6 +9,7 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
+from agents.models import AgentResult, AgentStatus
 from agents.browser_use_client import BrowserUseClient, BrowserUseError
 from agents.deep_researcher import DeepResearcher
 from agents.orchestrator import ResearchOrchestrator
@@ -22,6 +23,7 @@ from config import get_settings
 from db.convex_client import ConvexGateway
 from db.memory_gateway import InMemoryDatabaseGateway
 from enrichment.exa_client import ExaEnrichmentClient
+from enrichment.models import EnrichmentRequest
 from identification.detector import MediaPipeFaceDetector
 from identification.embedder import ArcFaceEmbedder
 from identification.search_manager import FaceSearchManager
@@ -73,14 +75,35 @@ face_searcher = FaceSearchManager(settings)
 # Enrichment + research + synthesis (None when API keys missing)
 exa_client = ExaEnrichmentClient(settings) if settings.exa_api_key else None
 orchestrator = ResearchOrchestrator(settings) if (settings.browser_use_api_key or settings.openai_api_key) else None
-synthesis_engine = AnthropicSynthesisEngine(settings) if settings.anthropic_api_key else None
-synthesis_fallback = GeminiSynthesisEngine(settings) if settings.gemini_api_key else None
+synthesis_engine = None
+if settings.anthropic_api_key:
+    try:
+        synthesis_engine = AnthropicSynthesisEngine(settings)
+    except Exception as exc:
+        logger.warning("Anthropic engine init failed, continuing without it: {}", exc)
+
+synthesis_fallback = None
+if settings.gemini_api_key:
+    try:
+        synthesis_fallback = GeminiSynthesisEngine(settings)
+    except Exception as exc:
+        logger.warning("Gemini engine init failed, continuing without it: {}", exc)
 
 # SuperMemory for person dossier caching (None when API key missing)
-supermemory_client = SuperMemoryClient(settings.supermemory_api_key) if settings.supermemory_api_key else None
+supermemory_client = None
+if settings.supermemory_api_key:
+    try:
+        supermemory_client = SuperMemoryClient(settings.supermemory_api_key)
+    except Exception as exc:
+        logger.warning("SuperMemory init failed, continuing without it: {}", exc)
 
 # DeepResearcher — unified pipeline (replaces per-agent orchestrator)
-deep_researcher = DeepResearcher(settings) if settings.browser_use_api_key else None
+deep_researcher = None
+if settings.browser_use_api_key:
+    try:
+        deep_researcher = DeepResearcher(settings)
+    except Exception as exc:
+        logger.warning("DeepResearcher init failed, falling back to Exa-only mode: {}", exc)
 
 # Audio command processor (Gemini Flash transcription)
 audio_processor = AudioCommandProcessor(settings.gemini_api_key) if settings.gemini_api_key else None
@@ -106,7 +129,12 @@ frame_handler = FrameHandler(
     embedder=embedder,
     face_searcher=face_searcher,
 )
-bu_client = BrowserUseClient(settings)
+bu_client = None
+if settings.browser_use_api_key:
+    try:
+        bu_client = BrowserUseClient(settings)
+    except Exception as exc:
+        logger.warning("BrowserUse client init failed, browser tasks disabled: {}", exc)
 upload_file = File(...)
 
 # Wire webhook router to the same pipeline
@@ -197,7 +225,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_origin],
+    allow_origins=[settings.frontend_origin, "http://localhost:3001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -352,12 +380,6 @@ async def stream_research(person_name: str, image_url: str | None = None):
 
     Frontend can consume with EventSource or fetch + ReadableStream.
     """
-    if not deep_researcher:
-        raise HTTPException(
-            status_code=503,
-            detail="Browser Use API key not configured — streaming unavailable",
-        )
-
     import json as _json
 
     async def event_generator():
@@ -395,6 +417,8 @@ async def stream_research(person_name: str, image_url: str | None = None):
 
         async def spawn_live_session():
             nonlocal live_session_id, live_url
+            if not bu_client:
+                return
             try:
                 twitter_cfg = SOURCE_CONFIGS["twitter"]
                 session = await bu_client.create_session(start_url=twitter_cfg["start_url"])
@@ -412,7 +436,8 @@ async def stream_research(person_name: str, image_url: str | None = None):
 
         # Launch session spawn in background — doesn't block research
         import asyncio as _asyncio
-        _asyncio.create_task(spawn_live_session())
+        if deep_researcher and bu_client:
+            _asyncio.create_task(spawn_live_session())
 
         # 3. Stream research results
         all_snippets: list[str] = []
@@ -420,16 +445,72 @@ async def stream_research(person_name: str, image_url: str | None = None):
         all_sources: list[str] = []
         agent_data: dict[str, str] = {}
 
-        async for result in pipeline.stream_research(person_name, person_id):
-            all_snippets.extend(result.snippets[:3])
-            all_urls.extend(result.urls_found[:5])
-            all_sources.append(result.agent_name)
-            # Collect full agent output for richer synthesis
-            agent_data[result.agent_name] = "\n".join(result.snippets[:10])
-            yield {
-                "event": "result",
-                "data": result.model_dump_json(),
-            }
+        if deep_researcher:
+            try:
+                async for result in pipeline.stream_research(person_name, person_id):
+                    all_snippets.extend(result.snippets[:3])
+                    all_urls.extend(result.urls_found[:5])
+                    all_sources.append(result.agent_name)
+                    # Collect full agent output for richer synthesis
+                    agent_data[result.agent_name] = "\n".join(result.snippets[:10])
+                    yield {
+                        "event": "result",
+                        "data": result.model_dump_json(),
+                    }
+            except Exception as exc:
+                logger.error("stream_research crashed for {}: {}", person_name, exc)
+                failure = AgentResult(
+                    agent_name="deep_researcher",
+                    status=AgentStatus.FAILED,
+                    snippets=[f"Research pipeline error: {exc}"],
+                )
+                all_sources.append(failure.agent_name)
+                yield {"event": "result", "data": failure.model_dump_json()}
+        elif exa_client:
+            # Graceful fallback: still return actionable search results without Browser Use.
+            try:
+                exa_result = await exa_client.enrich_person(EnrichmentRequest(name=person_name))
+                if exa_result.success and exa_result.hits:
+                    urls_found = [hit.url for hit in exa_result.hits if hit.url][:10]
+                    snippets = [
+                        f"[Exa] {hit.title}: {hit.snippet or ''}".strip()
+                        for hit in exa_result.hits[:10]
+                    ]
+                    fallback = AgentResult(
+                        agent_name="exa_fallback",
+                        status=AgentStatus.SUCCESS,
+                        snippets=snippets,
+                        urls_found=urls_found,
+                    )
+                    all_snippets.extend(fallback.snippets[:3])
+                    all_urls.extend(fallback.urls_found[:5])
+                    all_sources.append(fallback.agent_name)
+                    yield {"event": "result", "data": fallback.model_dump_json()}
+                else:
+                    failure = AgentResult(
+                        agent_name="exa_fallback",
+                        status=AgentStatus.FAILED,
+                        snippets=[exa_result.error or "No results found"],
+                    )
+                    all_sources.append(failure.agent_name)
+                    yield {"event": "result", "data": failure.model_dump_json()}
+            except Exception as exc:
+                logger.error("Exa enrichment crashed for {}: {}", person_name, exc)
+                failure = AgentResult(
+                    agent_name="exa_fallback",
+                    status=AgentStatus.FAILED,
+                    snippets=[f"Exa enrichment error: {exc}"],
+                )
+                all_sources.append(failure.agent_name)
+                yield {"event": "result", "data": failure.model_dump_json()}
+        else:
+            failure = AgentResult(
+                agent_name="search_unavailable",
+                status=AgentStatus.FAILED,
+                snippets=["Search is unavailable: configure Browser Use or Exa API key."],
+            )
+            all_sources.append(failure.agent_name)
+            yield {"event": "result", "data": failure.model_dump_json()}
 
         # 4. Run synthesis on collected data and push dossier to Convex
         if person_id and synthesis_engine:
@@ -499,6 +580,11 @@ async def audio_ws(websocket: WebSocket, room_code: str):
 @app.post("/api/agents/research", response_model=AgentStartResponse)
 async def start_research(req: AgentStartRequest) -> AgentStartResponse:
     """Spawn Browser Use sessions/tasks per source type. Returns immediately."""
+    if not bu_client:
+        raise HTTPException(
+            status_code=503,
+            detail="Browser Use client unavailable",
+        )
     agents: list[AgentInfo] = []
     for source_key in req.sources:
         cfg = SOURCE_CONFIGS.get(source_key)
@@ -550,6 +636,8 @@ def _map_bu_status(bu_status: str | None) -> str:
 @app.get("/api/agents/sessions/{session_id}", response_model=SessionStatusResponse)
 async def get_session_status(session_id: str) -> SessionStatusResponse:
     """Proxy Browser Use session + task status for frontend polling."""
+    if not bu_client:
+        return SessionStatusResponse(session_id=session_id, session_status="failed")
     try:
         session = await bu_client.get_session(session_id)
     except BrowserUseError as e:

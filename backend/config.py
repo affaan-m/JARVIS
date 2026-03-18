@@ -1,23 +1,28 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_BACKEND_DIR = Path(__file__).resolve().parent
+_ROOT_DIR = _BACKEND_DIR.parent
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # Prefer backend/.env when present, then fall back to repo-root .env.
+        env_file=(str(_BACKEND_DIR / ".env"), str(_ROOT_DIR / ".env")),
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
     app_name: str = "JARVIS API"
-    environment: str = Field(default="development", alias="SPECTER_ENV")
-    log_level: str = Field(default="INFO", alias="SPECTER_LOG_LEVEL")
-    frontend_origin: str = Field(default="http://localhost:3000", alias="SPECTER_FRONTEND_ORIGIN")
-    api_port: int = Field(default=8000, alias="SPECTER_API_PORT")
+    environment: str = Field(default="development", alias="JARVIS_ENV")
+    log_level: str = Field(default="INFO", alias="JARVIS_LOG_LEVEL")
+    frontend_origin: str = Field(default="http://localhost:3000", alias="JARVIS_FRONTEND_ORIGIN")
+    api_port: int = Field(default=8000, alias="JARVIS_API_PORT")
 
     convex_url: str | None = Field(default=None, alias="CONVEX_URL")
     mongodb_uri: str | None = Field(default=None, alias="MONGODB_URI")
