@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { useQuery } from "convex/react";
-import { api } from "../../convex/_generated/api";
+import { useConvexAvailable } from "@/app/ConvexClientProvider";
+import { useSafeConvexPersons } from "@/lib/useSafeConvexQuery";
 import type { IntelPerson, IntelSource, IntelSourceSessionStatus } from "@/lib/types";
 import { useFrameCapture } from "@/lib/useFrameCapture";
 import { useGlassesStream } from "@/lib/useGlassesStream";
@@ -17,6 +17,7 @@ import { BrowserSessionViewer } from "./BrowserSessionViewer";
 import { CameraFeed } from "./CameraFeed";
 import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
+import type { AgentEvent } from "./StatusBar";
 import { TopBar } from "./TopBar";
 
 /*
@@ -489,7 +490,45 @@ export default function IntelBoard() {
     liveUrl: streamLiveUrl,
     startStream,
     totalSources,
+    error: streamError,
   } = useResearchStream();
+
+  // Health check: verify backend is reachable on mount
+  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
+  useEffect(() => {
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    fetch(`${API_BASE}/api/health`, { signal: AbortSignal.timeout(3000) })
+      .then((r) => { setBackendOnline(r.ok); })
+      .catch(() => { setBackendOnline(false); });
+  }, []);
+
+  // Collect real agent events from streaming results for the StatusBar
+  const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
+  const prevStreamSourceCount = useRef(0);
+  useEffect(() => {
+    if (!streamPerson) {
+      // Reset events when no active stream person
+      if (prevStreamSourceCount.current > 0) {
+        prevStreamSourceCount.current = 0;
+      }
+      return;
+    }
+    const sources = streamPerson.sources;
+    if (sources.length > prevStreamSourceCount.current) {
+      const newSources = sources.slice(prevStreamSourceCount.current);
+      const now = new Date();
+      const timeStr = [now.getHours(), now.getMinutes(), now.getSeconds()]
+        .map((n) => n.toString().padStart(2, "0"))
+        .join(":");
+      const newEvents: AgentEvent[] = newSources.map((s) => ({
+        time: timeStr,
+        agent: s.tp.toLowerCase() || "agent",
+        msg: `${s.nm} — intel collected`,
+      }));
+      setAgentEvents((prev) => [...newEvents, ...prev].slice(0, 20));
+      prevStreamSourceCount.current = sources.length;
+    }
+  }, [streamPerson, streamPerson?.sources.length]);
 
   // Merge streamed person into people list
   const [people, setPeople] = useState<IntelPerson[]>([]);
@@ -499,7 +538,8 @@ export default function IntelBoard() {
   const [search, setSearch] = useState("");
 
   // ─── Convex persistence: load existing persons on mount ───
-  const convexPersons = useQuery(api.persons.listAll);
+  const convexAvailable = useConvexAvailable();
+  const convexPersons = useSafeConvexPersons();
   const hydrated = useRef(false);
   useEffect(() => {
     if (hydrated.current || !convexPersons || convexPersons.length === 0) return;
@@ -1148,8 +1188,35 @@ export default function IntelBoard() {
               zIndex: 2,
               display: "flex", flexDirection: "column", alignItems: "center", gap: 18,
             }}>
+              {/* Error / offline state */}
+              {(streamError || backendOnline === false) && pipelineStatus.stage === "idle" && (
+                <>
+                  <svg width="52" height="52" viewBox="0 0 52 52" style={{ opacity: 0.35 }}>
+                    <circle cx="26" cy="26" r="22" fill="none" stroke="rgba(239,68,68,.8)" strokeWidth="1.5" />
+                    <line x1="18" y1="18" x2="34" y2="34" stroke="rgba(239,68,68,.8)" strokeWidth="2" />
+                    <line x1="34" y1="18" x2="18" y2="34" stroke="rgba(239,68,68,.8)" strokeWidth="2" />
+                  </svg>
+                  <div style={{
+                    fontFamily: "var(--font-heading)", fontSize: 22,
+                    letterSpacing: "0.3em", color: "rgba(239,68,68,.45)",
+                  }}>
+                    {streamError ? "CONNECTION ERROR" : "BACKEND OFFLINE"}
+                  </div>
+                  <div style={{
+                    fontFamily: "var(--font-mono)", fontSize: 10.5,
+                    letterSpacing: ".07em", color: "rgba(239,68,68,.3)",
+                    lineHeight: 2, textTransform: "uppercase",
+                  }}>
+                    {streamError
+                      ? <>LOST CONNECTION TO RESEARCH PIPELINE<br />CHECK THAT THE BACKEND IS RUNNING ON PORT 8000</>
+                      : <>CANNOT REACH BACKEND API<br />RUN: cd backend &amp;&amp; python -m uvicorn main:app --port 8000</>
+                    }
+                  </div>
+                </>
+              )}
+
               {/* Dynamic icon based on pipeline stage */}
-              {pipelineStatus.stage === "idle" && (
+              {pipelineStatus.stage === "idle" && !streamError && backendOnline !== false && (
                 <svg width="52" height="52" viewBox="0 0 52 52" style={{ opacity: 0.18 }}>
                   <circle cx="26" cy="26" r="22" fill="none" stroke="rgba(120,180,80,1)" strokeWidth="1" />
                   <circle cx="26" cy="26" r="13" fill="none" stroke="rgba(120,180,80,1)" strokeWidth="0.5" />
@@ -1220,7 +1287,7 @@ export default function IntelBoard() {
                        pipelineStatus.stage === "idle" ? "rgba(120,180,80,.22)" : "rgba(120,180,80,.4)",
                 transition: "color .3s",
               }}>
-                {pipelineStatus.stage === "idle" && "NO ACTIVE TARGET"}
+                {pipelineStatus.stage === "idle" && !streamError && backendOnline !== false && "NO ACTIVE TARGET"}
                 {pipelineStatus.stage === "scanning" && "SCANNING"}
                 {pipelineStatus.stage === "detected" && "FACE DETECTED"}
                 {pipelineStatus.stage === "identifying" && "IDENTIFYING"}
@@ -1236,7 +1303,7 @@ export default function IntelBoard() {
                 lineHeight: 2, textTransform: "uppercase",
                 transition: "color .3s",
               }}>
-                {pipelineStatus.stage === "idle" && (
+                {pipelineStatus.stage === "idle" && !streamError && backendOnline !== false && (
                   <>SELECT A SUBJECT FROM THE SIDEBAR TO BEGIN ANALYSIS<br />OR CONNECT THE GLASSES CAMERA TO SCAN A NEW TARGET</>
                 )}
                 {pipelineStatus.stage === "scanning" && "LOOKING FOR FACES IN CAMERA FEED..."}
@@ -1624,7 +1691,13 @@ export default function IntelBoard() {
       </div>
 
       {/* BOTTOM STATUS BAR */}
-      <StatusBar people={people} activePerson={activePerson} />
+      <StatusBar
+        people={people}
+        activePerson={activePerson}
+        events={agentEvents}
+        backendOnline={backendOnline ?? undefined}
+        error={streamError}
+      />
 
       {/* ACHIEVEMENT TOAST */}
       {achievementToast && (

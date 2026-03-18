@@ -50,7 +50,7 @@ function useConvexActivity(): ActivityRecord[] | undefined {
   }));
 }
 
-export interface SpecterData {
+export interface JarvisData {
   persons: PersonRecord[];
   connections: ConnectionRecord[];
   activity: ActivityRecord[];
@@ -62,7 +62,7 @@ export interface SpecterData {
  * Top-level hook: call inside a component that is a descendant of ConvexClientProvider.
  * When NEXT_PUBLIC_CONVEX_URL is set, queries Convex; otherwise returns demo data.
  */
-export function useSpecterData(): SpecterData {
+export function useJarvisData(): JarvisData {
   const convexAvailable = useConvexAvailable();
 
   if (!convexAvailable) {
@@ -76,11 +76,11 @@ export function useSpecterData(): SpecterData {
   }
 
   // eslint-disable-next-line react-hooks/rules-of-hooks
-  return useSpecterDataLive();
+  return useJarvisDataLive();
 }
 
 /** Only called when ConvexProvider is mounted. */
-function useSpecterDataLive(): SpecterData {
+function useJarvisDataLive(): JarvisData {
   const persons = useConvexPersons();
   const connections = useConvexConnections();
   const activity = useConvexActivity();

@@ -4,23 +4,21 @@ import { useEffect, useRef, useState } from "react";
 
 import type { IntelPerson } from "@/lib/types";
 
+export interface AgentEvent {
+  time: string;
+  agent: string;
+  msg: string;
+}
+
 interface StatusBarProps {
   people: IntelPerson[];
   activePerson: IntelPerson | null;
+  events?: AgentEvent[];
+  backendOnline?: boolean;
+  error?: string | null;
 }
 
-// Demo agent events shown in the center ticker
-const DEMO_EVENTS = [
-  { time: "21:04:26", agent: "github-agent", msg: "CI scaffolding complete — 3 workflows active" },
-  { time: "21:03:12", agent: "linkedin-agent", msg: "Profile enrichment pass complete" },
-  { time: "21:02:44", agent: "exa-agent", msg: "Fast lookup finished — 7 signals found" },
-  { time: "21:02:08", agent: "browser-use", msg: "Twitter handle resolved via reverse lookup" },
-  { time: "21:01:33", agent: "orchestrator", msg: "Spawning tier-2 agents for active subject" },
-  { time: "21:00:55", agent: "face-id", msg: "ArcFace embedding matched — confidence 0.94" },
-  { time: "21:00:22", agent: "capture", msg: "Frame extracted from Meta glasses stream" },
-];
-
-export function StatusBar({ people, activePerson }: StatusBarProps) {
+export function StatusBar({ people, activePerson, events, backendOnline, error }: StatusBarProps) {
   const [eventIdx, setEventIdx] = useState(0);
   const [tick, setTick] = useState(true);
   const [elapsed, setElapsed] = useState(0);
@@ -42,17 +40,26 @@ export function StatusBar({ people, activePerson }: StatusBarProps) {
     return `${h}:${m}:${sec}`;
   };
 
+  const displayEvents = events && events.length > 0 ? events : null;
+
   // Rotate through events every 4s
   useEffect(() => {
+    if (!displayEvents) return;
     const id = setInterval(() => {
       setTick(false);
       setTimeout(() => {
-        setEventIdx(i => (i + 1) % DEMO_EVENTS.length);
+        setEventIdx(i => (i + 1) % displayEvents.length);
         setTick(true);
       }, 200);
     }, 4000);
     return () => clearInterval(id);
-  }, []);
+  }, [displayEvents]);
+
+  // Reset index when events change length
+  useEffect(() => {
+    setEventIdx(0);
+    setTick(true);
+  }, [displayEvents?.length]);
 
   // Snake canvas animation (idle state)
   useEffect(() => {
@@ -108,7 +115,7 @@ export function StatusBar({ people, activePerson }: StatusBarProps) {
     return () => cancelAnimationFrame(raf);
   }, [activePerson]);
 
-  const evt = DEMO_EVENTS[eventIdx];
+  const evt = displayEvents ? displayEvents[eventIdx % displayEvents.length] : null;
 
   return (
     <div
@@ -122,15 +129,25 @@ export function StatusBar({ people, activePerson }: StatusBarProps) {
         fontSize: 10,
       }}
     >
-      {/* LEFT — Active target */}
+      {/* LEFT — Active target or backend status */}
       {activePerson && (
         <div className="flex items-center shrink-0">
-          <span style={{ color: "rgba(170,210,140,.7)" }}>
-            ACTIVE:{" "}
-            <span style={{ color: "rgba(170,210,140,.95)", letterSpacing: ".04em", fontWeight: 600 }}>
-              {activePerson.name.toUpperCase()}
+          {error ? (
+            <span style={{ color: "rgba(239,68,68,.8)", letterSpacing: ".04em" }}>
+              ERROR: <span style={{ fontWeight: 600 }}>{error.toUpperCase()}</span>
             </span>
-          </span>
+          ) : backendOnline === false ? (
+            <span style={{ color: "rgba(239,68,68,.7)", letterSpacing: ".04em" }}>
+              BACKEND OFFLINE
+            </span>
+          ) : (
+            <span style={{ color: "rgba(170,210,140,.7)" }}>
+              ACTIVE:{" "}
+              <span style={{ color: "rgba(170,210,140,.95)", letterSpacing: ".04em", fontWeight: 600 }}>
+                {activePerson.name.toUpperCase()}
+              </span>
+            </span>
+          )}
         </div>
       )}
 
@@ -139,7 +156,7 @@ export function StatusBar({ people, activePerson }: StatusBarProps) {
         flex: 1, overflow: "hidden", position: "relative",
         padding: "0 24px", height: "100%", display: "flex", alignItems: "center",
       }}>
-        {activePerson ? (
+        {activePerson && evt ? (
           <div style={{
             width: "100%", textAlign: "center",
             opacity: tick ? 1 : 0, transition: "opacity .2s ease",
@@ -151,6 +168,14 @@ export function StatusBar({ people, activePerson }: StatusBarProps) {
             <span style={{ color: "rgba(170,210,140,.75)" }}>{evt.agent}:</span>
             {" "}
             <span style={{ color: "rgba(170,210,140,.6)" }}>{evt.msg}</span>
+          </div>
+        ) : activePerson && !evt ? (
+          <div style={{
+            width: "100%", textAlign: "center",
+            letterSpacing: ".06em",
+            color: "rgba(170,210,140,.35)",
+          }}>
+            Awaiting agent results...
           </div>
         ) : (
           <canvas
