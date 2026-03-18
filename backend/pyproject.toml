@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "jarvis-backend"
 version = "0.1.0"
 description = "FastAPI control plane for the JARVIS YC hackathon project"
-requires-python = ">=3.11"
+requires-python = ">=3.11, <3.14"
 dependencies = [
   "agentmail>=0.2.22",
   "anthropic>=0.52.0",
@@ -24,6 +24,8 @@ dependencies = [
   "opencv-python-headless>=4.10.0",
   "PicImageSearch>=3.12.11",
   "pillow>=12.1.0",
+  "pyasn1>=0.6.3",
+  "PyJWT>=2.12.0",
   "pydantic-settings>=2.10.1",
   "python-multipart>=0.0.20",
   "twscrape>=0.17.0",
