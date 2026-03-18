@@ -28,6 +28,9 @@ jobs:
       - name: Sync dependencies
         run: uv sync --extra dev
 
+      - name: Audit dependencies
+        run: uv tool run pip-audit --requirement <(uv export --no-hashes)
+
       - name: Ruff
         run: uv run ruff check .
 
@@ -53,6 +56,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
 
       - name: Test
         run: npm test
