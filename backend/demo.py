@@ -18,21 +18,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import io
 import sys
 import time
 from pathlib import Path
-from uuid import uuid4
 
 import httpx
 from loguru import logger
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
 
 from config import get_settings
-from db.memory_gateway import InMemoryDatabaseGateway
 from enrichment.exa_client import ExaEnrichmentClient
 from enrichment.models import EnrichmentRequest
 from identification.detector import MediaPipeFaceDetector
@@ -224,7 +219,7 @@ async def run_demo(person_name: str, image_path: str | None = None) -> None:
     # Stage 2: Face detection
     faces_detected = 0
     if image_data:
-        with StageTimer("Face detection (MediaPipe)", 2, total_stages) as t:
+        with StageTimer("Face detection (MediaPipe)", 2, total_stages) as _t:
             detector = MediaPipeFaceDetector()
             if detector.configured:
                 request = FaceDetectionRequest(image_data=image_data)

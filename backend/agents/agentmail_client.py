@@ -105,7 +105,7 @@ class AgentMailClient:
         import time
 
         messages = self.list_messages(inbox_id)
-        now = time.time()
+        _now = time.time()
 
         for msg in messages:
             # Check recency if created_at is available
@@ -243,7 +243,6 @@ class InboxPool:
 
         # Delete the inbox to free up the concurrent slot
         try:
-            from agentmail import AgentMail
 
             raw_client = self._client._get_client()
             raw_client.inboxes.delete(inbox_id=email)

@@ -35,7 +35,7 @@ class OsintAgent(BaseBrowserAgent):
 
         try:
             task = (
-                f"Go to https://www.google.com/search?q={query.replace(' ', '+')}+WHOIS+OR+patent+OR+trademark+OR+SEC+filing "
+                f"Go to https://www.google.com/search?q={query.replace(' ', '+')}+WHOIS+OR+patent+OR+trademark+OR+SEC+filing "  # noqa: E501
                 f"and use the extract tool to pull OSINT findings from the FIRST page only:\n"
                 f"- Domain registrations, WHOIS data\n"
                 f"- Patents, trademarks, SEC filings\n"

@@ -268,7 +268,7 @@ class SixtyFourClient:
             resp.raise_for_status()
 
             # Response may be a signed URL or direct CSV
-            data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else None
+            data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else None  # noqa: E501
 
             if data and data.get("url"):
                 # Download from signed URL
@@ -287,7 +287,7 @@ class SixtyFourClient:
             for row in reader:
                 rows.append(dict(row))
                 # Extract any URL-like fields
-                for key, value in row.items():
+                for _key, value in row.items():
                     if value and (
                         value.startswith("http")
                         or "linkedin.com" in value

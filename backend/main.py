@@ -8,10 +8,11 @@ import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
+from sse_starlette.sse import EventSourceResponse
 
-from agents.models import AgentResult, AgentStatus
 from agents.browser_use_client import BrowserUseClient, BrowserUseError
 from agents.deep_researcher import DeepResearcher
+from agents.models import AgentResult, AgentStatus
 from agents.orchestrator import ResearchOrchestrator
 from capture.audio_handler import AudioCommandProcessor
 from capture.frame_handler import FrameHandler
@@ -45,7 +46,6 @@ from schemas import (
     TaskPhase,
     TaskStep,
 )
-from sse_starlette.sse import EventSourceResponse
 from synthesis.anthropic_engine import AnthropicSynthesisEngine
 from synthesis.engine import GeminiSynthesisEngine
 from tasks import TASK_PHASES
@@ -53,7 +53,6 @@ from tasks import TASK_PHASES
 settings = get_settings()
 
 # Log to file so we can tail from CLI
-import sys
 logger.add("/tmp/jarvis_backend.log", rotation="10 MB", level="DEBUG",
            format="{time:HH:mm:ss.SSS} | {level:<7} | {name}:{function}:{line} | {message}")
 
@@ -74,7 +73,7 @@ face_searcher = FaceSearchManager(settings)
 
 # Enrichment + research + synthesis (None when API keys missing)
 exa_client = ExaEnrichmentClient(settings) if settings.exa_api_key else None
-orchestrator = ResearchOrchestrator(settings) if (settings.browser_use_api_key or settings.openai_api_key) else None
+orchestrator = ResearchOrchestrator(settings) if (settings.browser_use_api_key or settings.openai_api_key) else None  # noqa: E501
 synthesis_engine = None
 if settings.anthropic_api_key:
     try:
@@ -106,7 +105,7 @@ if settings.browser_use_api_key:
         logger.warning("DeepResearcher init failed, falling back to Exa-only mode: {}", exc)
 
 # Audio command processor (Gemini Flash transcription)
-audio_processor = AudioCommandProcessor(settings.gemini_api_key) if settings.gemini_api_key else None
+audio_processor = AudioCommandProcessor(settings.gemini_api_key) if settings.gemini_api_key else None  # noqa: E501
 
 pipeline = CapturePipeline(
     detector=detector,
@@ -195,7 +194,7 @@ _share_url_cache: dict[str, str] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info(
-        "JARVIS started — det={} emb={} db={} face_search={} exa={} deep_researcher={} synth={} (primary) synth_fallback={} supermemory={}",
+        "JARVIS started — det={} emb={} db={} face_search={} exa={} deep_researcher={} synth={} (primary) synth_fallback={} supermemory={}",  # noqa: E501
         detector.__class__.__name__,
         embedder.__class__.__name__,
         db_gateway.__class__.__name__,
@@ -516,7 +515,6 @@ async def stream_research(person_name: str, image_url: str | None = None):
         if person_id and synthesis_engine:
             try:
                 from synthesis.models import SynthesisRequest
-                from synthesis.models import SocialProfile as SynthSocialProfile
 
                 synth_request = SynthesisRequest(
                     person_name=person_name,
@@ -723,7 +721,7 @@ async def browser_use_webhook(request: Request):
     try:
         payload = _json.loads(body)
     except _json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+        raise HTTPException(status_code=400, detail="Invalid JSON")  # noqa: B904
 
     event_type = payload.get("type", "unknown")
     timestamp = payload.get("timestamp", "")

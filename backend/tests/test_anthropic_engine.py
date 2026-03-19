@@ -9,7 +9,6 @@ from config import Settings
 from synthesis.anthropic_engine import AnthropicSynthesisEngine
 from synthesis.models import SocialProfile, SynthesisRequest
 
-
 MOCK_DOSSIER_JSON = json.dumps({
     "summary": "Elon Musk is CEO of Tesla and SpaceX, and owner of X (formerly Twitter).",
     "title": "CEO",
@@ -337,7 +336,9 @@ async def test_pipeline_fallback_from_gemini_to_anthropic() -> None:
 
     with (
         patch.object(gemini_engine, "synthesize", return_value=gemini_result) as mock_gemini,
-        patch.object(anthropic_engine, "synthesize", return_value=anthropic_result) as mock_anthropic,
+        patch.object(
+            anthropic_engine, "synthesize", return_value=anthropic_result
+        ) as mock_anthropic,
     ):
         request = SynthesisRequest(person_name="Test Person")
 

@@ -5,9 +5,8 @@ import base64
 from io import BytesIO
 from uuid import uuid4
 
-from PIL import Image
-
 from loguru import logger
+from PIL import Image
 
 from identification.detector import MediaPipeFaceDetector
 from identification.embedder import ArcFaceEmbedder
@@ -94,7 +93,7 @@ class FrameHandler:
         if target and detections and not self._search_in_progress:
             # Use ALL detections (not just new) since user is targeting NOW
             crops = self.detector.crop_persons(frame_b64, detections)
-            logger.info("TARGET mode: {} person(s) detected, {} crop(s)", len(detections), len(crops))
+            logger.info("TARGET mode: {} person(s) detected, {} crop(s)", len(detections), len(crops))  # noqa: E501
 
             if crops:
                 # Pick the largest crop (most prominent person in view)
@@ -182,7 +181,7 @@ class FrameHandler:
             embedding = None
             if face_result.success and face_result.faces:
                 face = face_result.faces[0]
-                logger.info("Face detected in crop for track_id={} conf={:.2f}", tid, face.confidence)
+                logger.info("Face detected in crop for track_id={} conf={:.2f}", tid, face.confidence)  # noqa: E501
                 # Step 2: ArcFace embedding
                 embedding = self._embedder.embed(face, crop_bytes)
                 logger.info("Embedding generated for track_id={} dim={}", tid, len(embedding))
@@ -195,8 +194,9 @@ class FrameHandler:
             pimeyes_image = self._upscale_for_pimeyes(crop_bytes)
 
             # If crop is very small (<150px shortest side), prefer full frame
-            from PIL import Image as _PILImage
             from io import BytesIO as _BytesIO
+
+            from PIL import Image as _PILImage
             try:
                 _tmp = _PILImage.open(_BytesIO(crop_bytes))
                 short_side = min(_tmp.size)

@@ -154,7 +154,7 @@ async def signup_twitter(
             "status": "created",
             "result": str(result_text)[:500],
         }
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("twitter: signup timed out")
         return {"platform": "twitter", "status": "timeout"}
     except Exception as exc:
@@ -211,7 +211,7 @@ async def signup_linkedin(
             "status": "created",
             "result": str(result_text)[:500],
         }
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("linkedin: signup timed out")
         return {"platform": "linkedin", "status": "timeout"}
     except Exception as exc:
@@ -269,7 +269,7 @@ async def signup_instagram(
             "status": "created",
             "result": str(result_text)[:500],
         }
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("instagram: signup timed out")
         return {"platform": "instagram", "status": "timeout"}
     except Exception as exc:
@@ -325,7 +325,7 @@ async def signup_reddit(
             "status": "created",
             "result": str(result_text)[:500],
         }
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("reddit: signup timed out")
         return {"platform": "reddit", "status": "timeout"}
     except Exception as exc:
@@ -352,10 +352,10 @@ async def create_account_for_platform(
     info = PLATFORMS[platform]
     identity = _generate_identity()
 
-    logger.info("{}: generating identity — {} {}", platform, identity["first_name"], identity["last_name"])
+    logger.info("{}: generating identity — {} {}", platform, identity["first_name"], identity["last_name"])  # noqa: E501
 
     if dry_run:
-        logger.info("{}: DRY RUN — would create inbox and sign up at {}", platform, info["signup_url"])
+        logger.info("{}: DRY RUN — would create inbox and sign up at {}", platform, info["signup_url"])  # noqa: E501
         return {
             "platform": platform,
             "status": "dry_run",
@@ -440,7 +440,7 @@ async def main():
     accounts = _load_accounts()
     summary = []
 
-    for platform, result in zip(selected, results):
+    for platform, result in zip(selected, results, strict=False):
         if isinstance(result, Exception):
             logger.error("{}: failed with exception: {}", platform, result)
             summary.append({"platform": platform, "status": "exception", "error": str(result)})

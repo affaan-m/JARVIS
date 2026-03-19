@@ -129,7 +129,7 @@ class ResearchOrchestrator:
             exa_result = exa_task.result()
             if exa_result.success:
                 for hit in exa_result.hits:
-                    all_snippets.append(f"[Exa] {hit.title}: {hit.snippet[:200]}" if hit.snippet else f"[Exa] {hit.title}")
+                    all_snippets.append(f"[Exa] {hit.title}: {hit.snippet[:200]}" if hit.snippet else f"[Exa] {hit.title}")  # noqa: E501
                 agent_results["exa"] = AgentResult(
                     agent_name="exa",
                     status=AgentStatus.SUCCESS,

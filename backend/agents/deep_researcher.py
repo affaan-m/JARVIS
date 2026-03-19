@@ -17,7 +17,6 @@ import json
 import pathlib
 import time
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -188,7 +187,7 @@ class DeepResearcher:
 
         phase_timings["phase_0"] = round(time.monotonic() - t_phase, 2)
         logger.info(
-            "deep_researcher: phase 0 fast pass done — {} exa URLs in {:.2f}s (sixtyfour running in bg)",
+            "deep_researcher: phase 0 fast pass done — {} exa URLs in {:.2f}s (sixtyfour running in bg)",  # noqa: E501
             len(exa_urls),
             phase_timings["phase_0"],
         )
@@ -208,19 +207,19 @@ class DeepResearcher:
         # Check if SixtyFour finished by now (it ran in background during phase 1)
         try:
             await asyncio.wait_for(sf_task, timeout=2.0)
-        except (asyncio.TimeoutError, Exception):
+        except (TimeoutError, Exception):
             pass  # Don't block — move on
 
         if sixtyfour_result and getattr(sixtyfour_result, "success", False):
             sf_snippets, sf_urls, sf_profiles = [], [], []
             if sixtyfour_result.findings:
                 sf_snippets.extend(f"[SixtyFour] {f}" for f in sixtyfour_result.findings)
-            for attr, platform in [("linkedin", "linkedin"), ("twitter", "twitter"), ("github", "github"), ("instagram", "instagram")]:
+            for attr, platform in [("linkedin", "linkedin"), ("twitter", "twitter"), ("github", "github"), ("instagram", "instagram")]:  # noqa: E501
                 url = getattr(sixtyfour_result, attr, None)
                 if url:
                     sf_urls.append(url)
-                    sf_profiles.append(SocialProfile(platform=platform, url=url, display_name=sixtyfour_result.name or person))
-            for attr, label in [("email", "Email"), ("phone", "Phone"), ("title", "Title"), ("company", "Company")]:
+                    sf_profiles.append(SocialProfile(platform=platform, url=url, display_name=sixtyfour_result.name or person))  # noqa: E501
+            for attr, label in [("email", "Email"), ("phone", "Phone"), ("title", "Title"), ("company", "Company")]:  # noqa: E501
                 val = getattr(sixtyfour_result, attr, None)
                 if val:
                     sf_snippets.append(f"[SixtyFour] {label}: {val}")
@@ -315,7 +314,7 @@ class DeepResearcher:
                     continue
                 seen_urls.add(hit.url)
                 exa_urls.append(hit.url)
-                snippet = f"[Exa] {hit.title}: {hit.snippet[:200]}" if hit.snippet else f"[Exa] {hit.title}"
+                snippet = f"[Exa] {hit.title}: {hit.snippet[:200]}" if hit.snippet else f"[Exa] {hit.title}"  # noqa: E501
                 exa_snippets.append(snippet)
 
         return exa_urls, exa_snippets
@@ -448,7 +447,7 @@ class DeepResearcher:
         domain_matched: list[tuple[str, str]] = []
         launched_skills: set[str] = set()
 
-        for skill_name, task_str in core_skills + osint_skills:
+        for skill_name, _task_str in core_skills + osint_skills:
             launched_skills.add(skill_name)
 
         for url in exa_urls:
@@ -705,7 +704,7 @@ class DeepResearcher:
                             confidence=0.9,
                         )
 
-                elif label.startswith("wow:") and isinstance(result, dict) and result.get("success"):
+                elif label.startswith("wow:") and isinstance(result, dict) and result.get("success"):  # noqa: E501
                     output = result.get("output", "")
                     wow_name = label.replace("wow:", "")
                     task_id = result.get("task_id", "")
@@ -823,8 +822,8 @@ class DeepResearcher:
 
                 if result and result.get("success"):
                     output = result.get("output", "")
-                    task_id = result.get("task_id", "")
-                    live_url = result.get("live_url", "")
+                    _task_id = result.get("task_id", "")
+                    _live_url = result.get("live_url", "")
                     yield AgentResult(
                         agent_name=f"skill_{skill_name}_retry",
                         status=AgentStatus.SUCCESS,

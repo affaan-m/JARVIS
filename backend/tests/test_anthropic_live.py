@@ -50,7 +50,7 @@ async def test_live_anthropic_elon_musk() -> None:
     assert result.dossier is not None
 
     dossier = result.dossier
-    print(f"\n--- Elon Musk Dossier ---")
+    print("\n--- Elon Musk Dossier ---")
     print(f"Summary: {dossier.summary}")
     print(f"Title: {dossier.title}")
     print(f"Company: {dossier.company}")
@@ -97,7 +97,7 @@ async def test_live_exa_into_anthropic_less_famous_person() -> None:
     assert exa_result.success is True, f"Exa enrichment failed: {exa_result.error}"
     assert len(exa_result.hits) > 0
 
-    print(f"\n--- Exa Results for Jensen Huang ---")
+    print("\n--- Exa Results for Jensen Huang ---")
     print(f"Hits: {len(exa_result.hits)}")
     for hit in exa_result.hits[:5]:
         print(f"  [{hit.score:.2f}] {hit.title} - {hit.url}")
@@ -122,7 +122,7 @@ async def test_live_exa_into_anthropic_less_famous_person() -> None:
     assert result.dossier is not None
 
     dossier = result.dossier
-    print(f"\n--- Jensen Huang Dossier ---")
+    print("\n--- Jensen Huang Dossier ---")
     print(f"Summary: {dossier.summary}")
     print(f"Title: {dossier.title}")
     print(f"Company: {dossier.company}")

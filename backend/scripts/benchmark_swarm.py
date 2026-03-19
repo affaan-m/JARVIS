@@ -21,13 +21,13 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
+from rich.console import Console  # noqa: E402
+from rich.panel import Panel  # noqa: E402
+from rich.table import Table  # noqa: E402
 
-from agents.models import AgentResult, AgentStatus, OrchestratorResult, ResearchRequest
-from agents.orchestrator import ResearchOrchestrator
-from config import get_settings
+from agents.models import OrchestratorResult, ResearchRequest  # noqa: E402
+from agents.orchestrator import ResearchOrchestrator  # noqa: E402
+from config import get_settings  # noqa: E402
 
 DEFAULT_NAMES = [
     "Sam Altman",
@@ -168,7 +168,7 @@ async def main(names: list[str]) -> None:
 
     flags = settings.service_flags()
     console.print(Panel(
-        "\n".join(f"  {svc}: [{'green' if ok else 'red'}]{ok}[/]" for svc, ok in sorted(flags.items())),
+        "\n".join(f"  {svc}: [{'green' if ok else 'red'}]{ok}[/]" for svc, ok in sorted(flags.items())),  # noqa: E501
         title="[bold]Service Flags[/bold]",
     ))
 

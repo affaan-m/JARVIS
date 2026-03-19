@@ -4,15 +4,14 @@ import asyncio
 import io
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from typing import Any
 from uuid import uuid4
 
 from loguru import logger
 from PIL import Image
 
-from typing import Any
-
 from agents.deep_researcher import DeepResearcher
-from agents.models import AgentResult, AgentStatus, OrchestratorResult, ResearchRequest
+from agents.models import AgentResult, OrchestratorResult, ResearchRequest
 from agents.orchestrator import ResearchOrchestrator
 from capture.frame_extractor import extract_frames
 from db import DatabaseGateway
@@ -24,12 +23,11 @@ from identification.models import BoundingBox, FaceDetectionRequest, FaceSearchR
 from identification.search_manager import FaceSearchManager
 from memory.supermemory_client import SuperMemoryClient
 from observability.laminar import traced
-from synthesis.connections import detect_connections
 from synthesis.anthropic_engine import AnthropicSynthesisEngine
+from synthesis.connections import detect_connections
 from synthesis.engine import GeminiSynthesisEngine
-from synthesis.models import DossierReport
+from synthesis.models import DossierReport, SynthesisRequest
 from synthesis.models import SocialProfile as SynthSocialProfile
-from synthesis.models import SynthesisRequest
 
 
 @dataclass(frozen=True)

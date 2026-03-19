@@ -247,7 +247,7 @@ class CloudSkillRunner:
                 label,
                 timeout,
             )
-            return {"output": "", "success": False, "task_id": task_id, "live_url": live_url, "label": label, "timed_out": True}
+            return {"output": "", "success": False, "task_id": task_id, "live_url": live_url, "label": label, "timed_out": True}  # noqa: E501
 
         except Exception as exc:
             logger.error(

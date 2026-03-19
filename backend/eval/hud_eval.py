@@ -38,7 +38,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import get_settings
 from synthesis.models import DossierReport
 
-
 # ---------------------------------------------------------------------------
 # Eval scoring functions (pure, no side effects)
 # ---------------------------------------------------------------------------
@@ -83,7 +82,7 @@ def _has_any_social(dossier: DossierReport) -> bool:
     return any([sp.linkedin, sp.twitter, sp.instagram, sp.github, sp.website])
 
 
-async def score_accuracy(dossier: DossierReport, timeout: float = 10.0) -> tuple[float, dict[str, bool]]:
+async def score_accuracy(dossier: DossierReport, timeout: float = 10.0) -> tuple[float, dict[str, bool]]:  # noqa: E501
     """Score URL accuracy by checking if social profile URLs resolve (2xx/3xx)."""
     urls: dict[str, str] = {}
     sp = dossier.social_profiles
@@ -368,7 +367,7 @@ try:
     async def dossier_quality_scenario(person_name: str, min_score: float = 0.6):
         """Evaluate dossier quality for a person."""
         prompt = f"Generate a complete intelligence dossier for: {person_name}"
-        response = yield prompt
+        _response = yield prompt
 
         dossier, _ = await run_pipeline_for_subject(person_name)
         if dossier is None:
@@ -471,7 +470,7 @@ async def evaluate_person(
         elapsed_s=time.monotonic() - t0,
         info_density=info_density,
         false_positive_rate=false_positive_rate,
-        phase_timings={k: float(v) for k, v in raw_phase_timings.items()} if isinstance(raw_phase_timings, dict) else {},
+        phase_timings={k: float(v) for k, v in raw_phase_timings.items()} if isinstance(raw_phase_timings, dict) else {},  # noqa: E501
         sources_count=len(pipeline_meta.get("sources", [])),
         urls_discovered=urls_discovered,
         platforms_covered=len(platforms),

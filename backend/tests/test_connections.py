@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from synthesis.connections import (
-    ConnectionCandidate,
     _check_classmate,
     _check_co_mentioned,
     _check_colleague,

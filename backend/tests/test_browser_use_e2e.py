@@ -25,8 +25,7 @@ def _get_settings():
 
 def test_browser_use_sdk_imports():
     """Verify browser-use SDK is installed and importable."""
-    from browser_use import Agent, Browser
-    from browser_use import ChatBrowserUse
+    from browser_use import Agent, Browser, ChatBrowserUse
 
     assert Agent is not None
     assert Browser is not None

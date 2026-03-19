@@ -25,7 +25,7 @@ class UrlScraperAgent(BaseBrowserAgent):
 
     agent_name = "url_scraper"
 
-    def __init__(self, settings: Settings, *, url: str, source: str = "discovered", inbox_pool=None):
+    def __init__(self, settings: Settings, *, url: str, source: str = "discovered", inbox_pool=None):  # noqa: E501
         super().__init__(settings, inbox_pool=inbox_pool)
         self._target_url = url
         self._source = source

@@ -12,7 +12,13 @@ import json
 from loguru import logger
 
 from agents.browser_agent import BaseBrowserAgent
-from agents.models import AgentResult, AgentStatus, ResearchRequest, SocialProfile, parse_human_number
+from agents.models import (
+    AgentResult,
+    AgentStatus,
+    ResearchRequest,
+    SocialProfile,
+    parse_human_number,
+)
 from config import Settings
 
 
@@ -120,7 +126,7 @@ class TwitterAgent(BaseBrowserAgent):
         try:
             query = self._build_search_query(request)
             task = (
-                f"Go to https://www.google.com/search?q={query.replace(' ', '+')}+site:x.com+OR+site:twitter.com "
+                f"Go to https://www.google.com/search?q={query.replace(' ', '+')}+site:x.com+OR+site:twitter.com "  # noqa: E501
                 f"and use the extract tool to get this JSON from the Google results:\n"
                 f'{{"username": "", "display_name": "", "bio": "", '
                 f'"followers": 0, "following": 0, "profile_url": ""}}\n'

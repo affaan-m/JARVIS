@@ -65,7 +65,7 @@ class PimEyesSearcher:
                 self._cookies = {c["name"]: c["value"] for c in data}
             else:
                 self._cookies = data
-            logger.info("PimEyes: loaded {} cookies from {}", len(self._cookies), _COOKIES_FILE.name)
+            logger.info("PimEyes: loaded {} cookies from {}", len(self._cookies), _COOKIES_FILE.name)  # noqa: E501
             return self._cookies
 
         logger.warning("PimEyes: no cookies file at {}", _COOKIES_FILE)
@@ -99,9 +99,9 @@ class PimEyesSearcher:
                 return await self._search_via_browser_use(request.image_data)
             except Exception as exc:
                 logger.error("PimEyes Browser Use fallback failed: {}", exc)
-                return FaceSearchResult(success=False, error=f"Both PimEyes methods failed: {exc}")
+                return FaceSearchResult(success=False, error=f"Both PimEyes methods failed: {exc}")  # noqa: E501
 
-        return FaceSearchResult(success=False, error="PimEyes cookies expired and no Browser Use fallback configured")
+        return FaceSearchResult(success=False, error="PimEyes cookies expired and no Browser Use fallback configured")  # noqa: E501
 
     async def _search_via_api(self, image_data: bytes) -> FaceSearchResult:
         """Direct PimEyes API: upload → search → fetch results → resolve URLs."""
@@ -151,7 +151,7 @@ class PimEyesSearcher:
             if upload_resp.status_code != 200:
                 return FaceSearchResult(
                     success=False,
-                    error=f"PimEyes upload failed: HTTP {upload_resp.status_code} — {upload_resp.text[:200]}",
+                    error=f"PimEyes upload failed: HTTP {upload_resp.status_code} — {upload_resp.text[:200]}",  # noqa: E501
                 )
 
             upload_data = upload_resp.json()
@@ -194,7 +194,7 @@ class PimEyesSearcher:
                     error=f"PimEyes returned no searchHash/apiUrl: {search_data}",
                 )
 
-            logger.info("PimEyes: search started, hash={}, apiUrl={}", search_hash[:16], api_url[:60])
+            logger.info("PimEyes: search started, hash={}, apiUrl={}", search_hash[:16], api_url[:60])  # noqa: E501
 
             # Step 4: Fetch results from external results API (no auth needed)
             results = await self._fetch_results(api_url, search_hash, limit=50)
