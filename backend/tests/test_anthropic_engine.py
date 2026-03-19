@@ -106,8 +106,8 @@ async def test_anthropic_synthesize_success() -> None:
 
     mock_client.messages.create.assert_called_once()
     call_kwargs = mock_client.messages.create.call_args.kwargs
-    assert call_kwargs["model"] == "claude-sonnet-4-20250514"
-    assert call_kwargs["max_tokens"] == 4096
+    assert call_kwargs["model"] == "claude-sonnet-4-6"
+    assert call_kwargs["max_tokens"] == 8192
 
 
 @pytest.mark.anyio

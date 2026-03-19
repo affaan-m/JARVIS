@@ -38,6 +38,7 @@ class TestPipelineWiring:
             "EXA_API_KEY": "test-exa-key",
             "GEMINI_API_KEY": "test-gemini-key",
             "BROWSER_USE_API_KEY": "test-browser-key",
+            "ANTHROPIC_API_KEY": "test-anthropic-key",
         }
         with patch.dict("os.environ", env, clear=False):
             m = _import_main_fresh()

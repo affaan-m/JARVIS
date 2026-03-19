@@ -112,7 +112,7 @@ class TestAgentModels:
     def test_research_request_defaults(self) -> None:
         req = ResearchRequest(person_name="Jane Doe")
         assert req.company is None
-        assert req.timeout_seconds == 180.0
+        assert req.timeout_seconds == 90.0
         assert req.face_search_urls == []
 
     def test_research_request_full(self) -> None:

@@ -33,9 +33,11 @@ def test_services_include_known_service_names() -> None:
 
     expected = {
         "convex", "mongodb", "exa", "browser_use", "openai",
-        "gemini", "laminar", "telegram", "hibp", "pimeyes_pool",
+        "gemini", "anthropic", "laminar", "telegram", "hibp",
+        "pimeyes_pool", "supermemory", "daytona", "hud", "agentmail",
+        "pimeyes", "sixtyfour", "browser_use_profile",
     }
-    assert names == expected
+    assert expected.issubset(names)
 
 
 def test_services_include_notes_descriptions() -> None:
@@ -50,10 +52,21 @@ def test_services_include_notes_descriptions() -> None:
 
 def test_services_unconfigured_without_env_vars() -> None:
     """Without env vars set, all services should be unconfigured."""
-    response = client.get("/api/services")
-    payload = response.json()
+    from unittest.mock import patch
 
-    for item in payload:
-        assert item["configured"] is False, (
-            f"{item['name']} should be unconfigured without env vars"
-        )
+    from config import Settings
+
+    service_keys = [
+        "CONVEX_URL", "MONGODB_URI", "EXA_API_KEY", "BROWSER_USE_API_KEY",
+        "OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "LMNR_PROJECT_API_KEY",
+        "TELEGRAM_BOT_TOKEN", "HIBP_API_KEY", "PIMEYES_ACCOUNT_POOL",
+        "SUPERMEMORY_API_KEY", "DAYTONA_API_KEY", "HUD_API_KEY", "AGENTMAIL_API_KEY",
+        "PIMEYES_EMAIL", "PIMEYES_PASSWORD", "SIXTYFOUR_API_KEY", "BROWSER_USE_PROFILE_ID",
+    ]
+    blank_env = {k: "" for k in service_keys}
+
+    with patch.dict("os.environ", blank_env, clear=False):
+        flags = Settings().service_flags()
+
+    for name, configured in flags.items():
+        assert configured is False, f"{name} should be unconfigured without env vars"

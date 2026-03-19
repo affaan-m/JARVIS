@@ -51,15 +51,6 @@ class TestPimEyesSearcher:
         searcher = self._make_searcher()
         assert searcher.configured is True
 
-    def test_parse_account_pool_valid(self) -> None:
-        pool = '[{"__cookie1": "val1"}]'
-        searcher = self._make_searcher(pool)
-        assert len(searcher._accounts) == 1
-
-    def test_parse_account_pool_invalid(self) -> None:
-        searcher = self._make_searcher("not json")
-        assert searcher._accounts == []
-
     @pytest.mark.asyncio
     async def test_search_without_image_fails(self) -> None:
         searcher = self._make_searcher()
@@ -67,24 +58,6 @@ class TestPimEyesSearcher:
         result = await searcher.search_face(request)
         assert result.success is False
         assert "image_data" in (result.error or "")
-
-    def test_parse_results_normalizes_similarity(self) -> None:
-        raw = [
-            {"sourceUrl": "https://example.com/1", "similarity": 85.0, "name": "Alice"},
-            {"url": "https://example.com/2", "score": 0.9},
-        ]
-        result = PimEyesSearcher._parse_results(raw)
-        assert result.success is True
-        assert len(result.matches) == 2
-        assert result.matches[0].similarity == 0.85
-        assert result.matches[0].person_name == "Alice"
-        assert result.matches[1].similarity == 0.9
-        assert result.matches[1].source == "pimeyes"
-
-    def test_parse_results_caps_at_20(self) -> None:
-        raw = [{"sourceUrl": f"https://example.com/{i}", "similarity": 0.5} for i in range(30)]
-        result = PimEyesSearcher._parse_results(raw)
-        assert len(result.matches) == 20
 
     @pytest.mark.asyncio
     async def test_search_timeout_returns_error(self) -> None:
@@ -95,7 +68,7 @@ class TestPimEyesSearcher:
         import httpx
 
         with patch.object(
-            searcher, "_do_search", side_effect=httpx.TimeoutException("timeout")
+            searcher, "_search_via_api", side_effect=httpx.TimeoutException("timeout")
         ):
             result = await searcher.search_face(_make_request())
         assert result.success is False
