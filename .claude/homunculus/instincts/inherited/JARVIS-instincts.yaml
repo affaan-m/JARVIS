@@ -1,0 +1,343 @@
+# Instincts generated from https://github.com/affaan-m/JARVIS
+# Generated: 2026-05-11T19:43:10.519Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: JARVIS-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/affaan-m/JARVIS
+---
+
+# JARVIS Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: chore
+
+## Evidence
+
+- 2 commits analyzed
+- Detected conventional commit pattern
+- Examples: chore(deps): bump the uv group across 1 directory with 8 updates, chore: clear dependency audit failures
+
+---
+id: JARVIS-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/affaan-m/JARVIS
+---
+
+# JARVIS Commit Length
+
+## Action
+
+Write moderate-length commit messages (~51 characters)
+
+## Evidence
+
+- Average commit message length: 51 chars
+- Based on 2 commits
+
+---
+id: JARVIS-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/affaan-m/JARVIS
+---
+
+# JARVIS Naming Files
+
+## Action
+
+Use camelCase naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: camelCase
+
+---
+id: JARVIS-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/affaan-m/JARVIS
+---
+
+# JARVIS Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: JARVIS-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/affaan-m/JARVIS
+---
+
+# JARVIS Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: JARVIS-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/affaan-m/JARVIS
+---
+
+# JARVIS Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: JARVIS-workflow-dependency-update-workflow
+trigger: "when doing dependency update workflow"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/affaan-m/JARVIS
+---
+
+# JARVIS Workflow Dependency Update Workflow
+
+## Action
+
+Follow the dependency-update-workflow workflow:
+1. Update dependency version(s) in backend/pyproject.toml or frontend/package.json
+2. Regenerate lockfiles (backend/uv.lock, frontend/package-lock.json)
+3. Commit changes to dependency files and lockfiles
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: backend/pyproject.toml, backend/uv.lock, frontend/package.json
+
+---
+id: jarvis-instinct-file-naming-camelCase
+trigger: "When creating or renaming a file in the codebase"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: affaan-m/JARVIS
+---
+
+# Jarvis Instinct File Naming CamelCase
+
+## Action
+
+Name the file using camelCase convention
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.files: camelCase
+
+---
+id: jarvis-instinct-function-naming-camelCase
+trigger: "When defining a new function"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: affaan-m/JARVIS
+---
+
+# Jarvis Instinct Function Naming CamelCase
+
+## Action
+
+Name the function using camelCase convention
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.functions: camelCase
+
+---
+id: jarvis-instinct-class-naming-PascalCase
+trigger: "When defining a new class"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: affaan-m/JARVIS
+---
+
+# Jarvis Instinct Class Naming PascalCase
+
+## Action
+
+Name the class using PascalCase convention
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.classes: PascalCase
+
+---
+id: jarvis-instinct-constant-naming-SCREAMING_SNAKE_CASE
+trigger: "When defining a constant"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: affaan-m/JARVIS
+---
+
+# Jarvis Instinct Constant Naming SCREAMING_SNAKE_CASE
+
+## Action
+
+Name the constant using SCREAMING_SNAKE_CASE convention
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.constants: SCREAMING_SNAKE_CASE
+
+---
+id: jarvis-instinct-import-style-relative
+trigger: "When importing modules in TypeScript files"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: affaan-m/JARVIS
+---
+
+# Jarvis Instinct Import Style Relative
+
+## Action
+
+Use relative import paths
+
+## Evidence
+
+- Pattern in codeStyle.importStyle: relative
+
+---
+id: jarvis-instinct-export-style-named
+trigger: "When exporting modules or functions"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: affaan-m/JARVIS
+---
+
+# Jarvis Instinct Export Style Named
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in codeStyle.exportStyle: named
+
+---
+id: jarvis-instinct-test-location-separate
+trigger: "When adding or organizing test files"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: affaan-m/JARVIS
+---
+
+# Jarvis Instinct Test Location Separate
+
+## Action
+
+Place test files in a separate directory from source files
+
+## Evidence
+
+- Pattern in architecture.folderStructure.testLocation: separate
+
+---
+id: jarvis-instinct-git-commit-conventional-chore
+trigger: "When committing dependency updates or maintenance changes"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: affaan-m/JARVIS
+---
+
+# Jarvis Instinct Git Commit Conventional Chore
+
+## Action
+
+Use the 'chore' prefix in the conventional commit format (e.g., chore(deps): ...)
+
+## Evidence
+
+- Seen in commit: chore(deps): bump the uv group across 1 directory with 8 updates
+- Pattern in commits.prefixes: chore
+
+---
+id: jarvis-instinct-git-commit-length
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: affaan-m/JARVIS
+---
+
+# Jarvis Instinct Git Commit Length
+
+## Action
+
+Keep the commit message concise, around 50 characters
+
+## Evidence
+
+- Pattern in commits.averageLength: 51
+
+---
+id: jarvis-instinct-dependency-update-workflow
+trigger: "When dependencies need to be updated or audit failures resolved"
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: affaan-m/JARVIS
+---
+
+# Jarvis Instinct Dependency Update Workflow
+
+## Action
+
+Update dependency versions in backend/pyproject.toml or frontend/package.json, regenerate lockfiles (backend/uv.lock, frontend/package-lock.json), and commit all changes
+
+## Evidence
+
+- Workflow: dependency-update-workflow
+- Seen in commits: chore(deps): bump the uv group..., chore: clear dependency audit failures
+
