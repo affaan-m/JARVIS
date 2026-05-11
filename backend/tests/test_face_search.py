@@ -45,6 +45,10 @@ class TestPimEyesSearcher:
 
         settings = MagicMock()
         settings.pimeyes_account_pool = pool
+        settings.pimeyes_email = "pimeyes@example.com"
+        settings.pimeyes_password = "pimeyes-password"
+        settings.browser_use_api_key = None
+        settings.browser_use_profile_id = None
         return PimEyesSearcher(settings)
 
     def test_configured_without_accounts(self) -> None:

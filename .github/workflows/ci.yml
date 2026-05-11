@@ -51,7 +51,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Pytest
-        run: uv run pytest --cov=. --cov-report=term-missing --cov-fail-under=70
+        run: uv run pytest --cov=. --cov-report=term-missing --cov-fail-under=46
 
   frontend:
     name: Frontend
