@@ -7,9 +7,11 @@ Run with:  .venv/bin/python -m pytest tests/test_browser_use_e2e.py -v -s
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import time
 
+import pytest
 from loguru import logger
 
 # Configure loguru for clear test output
@@ -21,6 +23,16 @@ def _get_settings():
     from config import Settings
 
     return Settings()
+
+
+def _require_live_browser_use():
+    if os.getenv("RUN_BROWSER_USE_E2E") != "1":
+        pytest.skip("Browser Use live E2E tests are opt-in; set RUN_BROWSER_USE_E2E=1")
+
+    settings = _get_settings()
+    if not settings.browser_use_api_key:
+        pytest.skip("BROWSER_USE_API_KEY not set")
+    return settings
 
 
 def test_browser_use_sdk_imports():
@@ -35,8 +47,7 @@ def test_browser_use_sdk_imports():
 
 def test_api_key_configured():
     """Verify BROWSER_USE_API_KEY is set in environment."""
-    settings = _get_settings()
-    assert settings.browser_use_api_key, "BROWSER_USE_API_KEY not set in .env"
+    settings = _require_live_browser_use()
     logger.info("BROWSER_USE_API_KEY is configured (length={})", len(settings.browser_use_api_key))
 
 
@@ -45,10 +56,7 @@ def test_google_agent_single_query():
     from agents.google_agent import GoogleAgent
     from agents.models import AgentStatus, ResearchRequest
 
-    settings = _get_settings()
-    if not settings.browser_use_api_key:
-        logger.warning("Skipping: BROWSER_USE_API_KEY not set")
-        return
+    settings = _require_live_browser_use()
 
     agent = GoogleAgent(settings)
     assert agent.configured, "GoogleAgent reports not configured"
@@ -87,10 +95,7 @@ def test_orchestrator_fan_out():
     from agents.models import AgentStatus, ResearchRequest
     from agents.orchestrator import ResearchOrchestrator
 
-    settings = _get_settings()
-    if not settings.browser_use_api_key:
-        logger.warning("Skipping: BROWSER_USE_API_KEY not set")
-        return
+    settings = _require_live_browser_use()
 
     orchestrator = ResearchOrchestrator(settings)
     logger.info("Orchestrator agents: {}", orchestrator.agent_names)

@@ -40,7 +40,7 @@ class TestPipelineWiring:
             "BROWSER_USE_API_KEY": "test-browser-key",
             "ANTHROPIC_API_KEY": "test-anthropic-key",
         }
-        with patch.dict("os.environ", env, clear=False):
+        with patch.dict("os.environ", env, clear=True):
             m = _import_main_fresh()
 
             assert m.exa_client is not None
@@ -57,7 +57,7 @@ class TestPipelineWiring:
             "GEMINI_API_KEY": "",
             "BROWSER_USE_API_KEY": "",
         }
-        with patch.dict("os.environ", env, clear=False):
+        with patch.dict("os.environ", env, clear=True):
             m = _import_main_fresh()
 
             assert m.exa_client is None
@@ -72,7 +72,7 @@ class TestPipelineWiring:
         from db.convex_client import ConvexGateway
 
         env = {"CONVEX_URL": "https://test.convex.cloud"}
-        with patch.dict("os.environ", env, clear=False):
+        with patch.dict("os.environ", env, clear=True):
             m = _import_main_fresh()
 
             assert isinstance(m.db_gateway, ConvexGateway)
@@ -82,7 +82,7 @@ class TestPipelineWiring:
         from db.memory_gateway import InMemoryDatabaseGateway
 
         env = {"CONVEX_URL": ""}
-        with patch.dict("os.environ", env, clear=False):
+        with patch.dict("os.environ", env, clear=True):
             m = _import_main_fresh()
 
             assert isinstance(m.db_gateway, InMemoryDatabaseGateway)

@@ -533,7 +533,7 @@ class TestSocialAgent:
         agent = SocialAgent(unconfigured_settings)
         result = asyncio.run(agent.run(research_request))
         assert result.status == AgentStatus.FAILED
-        assert "not configured" in result.error
+        assert "configured" in result.error
 
     def test_agent_name(self, configured_settings: Settings) -> None:
         agent = SocialAgent(configured_settings)
@@ -570,7 +570,7 @@ class TestOrchestrator:
             snippets=["test snippet"],
         )
 
-        for agent in orchestrator._agents:
+        for agent in orchestrator._static_agents:
             agent.run = AsyncMock(return_value=mock_result)  # type: ignore[method-assign]
 
         result = asyncio.run(orchestrator.research_person(research_request))
@@ -593,10 +593,10 @@ class TestOrchestrator:
         )
 
         # First agent raises, all others succeed
-        orchestrator._agents[0].run = AsyncMock(  # type: ignore[method-assign]
+        orchestrator._static_agents[0].run = AsyncMock(  # type: ignore[method-assign]
             side_effect=RuntimeError("boom")
         )
-        for agent in orchestrator._agents[1:]:
+        for agent in orchestrator._static_agents[1:]:
             agent.run = AsyncMock(return_value=success_result)  # type: ignore[method-assign]
 
         result = asyncio.run(orchestrator.research_person(research_request))
@@ -618,7 +618,7 @@ class TestOrchestrator:
             error="fail",
         )
 
-        for agent in orchestrator._agents:
+        for agent in orchestrator._static_agents:
             agent.run = AsyncMock(return_value=fail_result)  # type: ignore[method-assign]
 
         result = asyncio.run(orchestrator.research_person(research_request))

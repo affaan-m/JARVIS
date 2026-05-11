@@ -85,12 +85,17 @@ class PimEyesSearcher:
             )
 
         # Tier 1: Cookie-based direct API (~3-8s)
+        api_error: str | None = None
         try:
             result = await self._search_via_api(request.image_data)
             if result.success:
                 return result
+            api_error = result.error
             logger.warning("PimEyes API failed: {} — trying Browser Use fallback", result.error)
         except Exception as exc:
+            api_error = str(exc)
+            if "timeout" in api_error.lower() and "timed out" not in api_error.lower():
+                api_error = f"timed out: {api_error}"
             logger.error("PimEyes API search failed: {} — trying Browser Use fallback", exc)
 
         # Tier 2: Browser Use fallback (~30-60s)
@@ -100,6 +105,12 @@ class PimEyesSearcher:
             except Exception as exc:
                 logger.error("PimEyes Browser Use fallback failed: {}", exc)
                 return FaceSearchResult(success=False, error=f"Both PimEyes methods failed: {exc}")  # noqa: E501
+
+        if api_error:
+            return FaceSearchResult(
+                success=False,
+                error=f"PimEyes API failed and no Browser Use fallback configured: {api_error}",
+            )
 
         return FaceSearchResult(success=False, error="PimEyes cookies expired and no Browser Use fallback configured")  # noqa: E501
 

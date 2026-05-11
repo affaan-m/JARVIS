@@ -5,9 +5,21 @@ from unittest.mock import patch
 
 from config import Settings
 
+ALL_SERVICE_FLAGS = {
+    "convex", "mongodb", "exa", "browser_use", "openai",
+    "gemini", "anthropic", "laminar", "telegram", "hibp",
+    "pimeyes_pool", "supermemory", "daytona", "hud", "agentmail",
+    "pimeyes", "sixtyfour", "browser_use_profile",
+}
+
+
+def _settings_with_env(env: dict[str, str] | None = None) -> Settings:
+    with patch.dict(os.environ, env or {}, clear=True):
+        return Settings(_env_file=None)  # type: ignore[call-arg]
+
 
 def test_settings_defaults() -> None:
-    s = Settings()
+    s = _settings_with_env()
     assert s.app_name == "JARVIS API"
     assert s.environment == "development"
     assert s.log_level == "INFO"
@@ -16,7 +28,7 @@ def test_settings_defaults() -> None:
 
 
 def test_settings_service_flags_all_unconfigured() -> None:
-    s = Settings()
+    s = _settings_with_env()
     flags = s.service_flags()
 
     assert isinstance(flags, dict)
@@ -25,16 +37,14 @@ def test_settings_service_flags_all_unconfigured() -> None:
 
 
 def test_settings_service_flags_with_convex_url() -> None:
-    with patch.dict(os.environ, {"CONVEX_URL": "https://convex.example.com"}):
-        s = Settings()
+    s = _settings_with_env({"CONVEX_URL": "https://convex.example.com"})
     flags = s.service_flags()
     assert flags["convex"] is True
     assert flags["mongodb"] is False
 
 
 def test_settings_service_flags_with_exa_key() -> None:
-    with patch.dict(os.environ, {"EXA_API_KEY": "exa-test-key"}):
-        s = Settings()
+    s = _settings_with_env({"EXA_API_KEY": "exa-test-key"})
     flags = s.service_flags()
     assert flags["exa"] is True
 
@@ -47,13 +57,21 @@ def test_settings_service_flags_with_all_keys() -> None:
         "BROWSER_USE_API_KEY": "bu-key",
         "OPENAI_API_KEY": "sk-key",
         "GEMINI_API_KEY": "gem-key",
-        "LAMINAR_API_KEY": "lam-key",
+        "ANTHROPIC_API_KEY": "anthropic-key",
+        "LMNR_PROJECT_API_KEY": "lam-key",
         "TELEGRAM_BOT_TOKEN": "bot-token",
         "HIBP_API_KEY": "hibp-key",
         "PIMEYES_ACCOUNT_POOL": '[{"email": "a@b.com"}]',
+        "SUPERMEMORY_API_KEY": "sm-key",
+        "DAYTONA_API_KEY": "daytona-key",
+        "HUD_API_KEY": "hud-key",
+        "AGENTMAIL_API_KEY": "agentmail-key",
+        "PIMEYES_EMAIL": "pimeyes@example.com",
+        "PIMEYES_PASSWORD": "pimeyes-password",
+        "SIXTYFOUR_API_KEY": "sixtyfour-key",
+        "BROWSER_USE_PROFILE_ID": "profile-id",
     }
-    with patch.dict(os.environ, env):
-        s = Settings()
+    s = _settings_with_env(env)
     flags = s.service_flags()
 
     for key, value in flags.items():
@@ -61,30 +79,24 @@ def test_settings_service_flags_with_all_keys() -> None:
 
 
 def test_settings_pimeyes_pool_empty_string_is_unconfigured() -> None:
-    with patch.dict(os.environ, {"PIMEYES_ACCOUNT_POOL": ""}):
-        s = Settings()
+    s = _settings_with_env({"PIMEYES_ACCOUNT_POOL": ""})
     flags = s.service_flags()
     assert flags["pimeyes_pool"] is False
 
 
 def test_settings_pimeyes_pool_empty_list_is_unconfigured() -> None:
-    s = Settings()
+    s = _settings_with_env()
     flags = s.service_flags()
     assert flags["pimeyes_pool"] is False
 
 
 def test_settings_pimeyes_pool_with_data_is_configured() -> None:
-    with patch.dict(os.environ, {"PIMEYES_ACCOUNT_POOL": '[{"email":"test@test.com"}]'}):
-        s = Settings()
+    s = _settings_with_env({"PIMEYES_ACCOUNT_POOL": '[{"email":"test@test.com"}]'})
     flags = s.service_flags()
     assert flags["pimeyes_pool"] is True
 
 
 def test_settings_service_flags_has_all_expected_keys() -> None:
-    s = Settings()
+    s = _settings_with_env()
     flags = s.service_flags()
-    expected_keys = {
-        "convex", "mongodb", "exa", "browser_use", "openai",
-        "gemini", "laminar", "telegram", "hibp", "pimeyes_pool",
-    }
-    assert set(flags.keys()) == expected_keys
+    assert set(flags.keys()) == ALL_SERVICE_FLAGS

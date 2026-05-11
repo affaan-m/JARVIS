@@ -15,3 +15,5 @@ jobs:
 
       - name: Review dependencies
         uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
