@@ -32,7 +32,7 @@ jobs:
         # browser-use 0.12.x pins authlib==1.6.6, pillow==12.1.0, and pypdf==6.6.2
         # exactly — these CVEs cannot be fixed until browser-use releases updated deps.
         run: |
-          uv tool run pip-audit --requirement <(uv export --no-hashes) \
+          uv tool run pip-audit --disable-pip --no-deps --requirement <(uv export --no-hashes) \
             --ignore-vuln CVE-2026-28802 \
             --ignore-vuln CVE-2026-27962 \
             --ignore-vuln CVE-2026-28490 \
