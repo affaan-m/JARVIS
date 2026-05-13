@@ -73,6 +73,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify registry signatures
+        run: npm audit signatures
+
       - name: Audit dependencies
         run: npm audit --audit-level=high
 
