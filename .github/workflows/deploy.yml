@@ -46,33 +46,50 @@ jobs:
 
   frontend-vercel:
     name: Frontend Vercel
-    if: ${{ secrets.VERCEL_TOKEN != '' && secrets.VERCEL_ORG_ID != '' && secrets.VERCEL_PROJECT_ID != '' }}
     runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
     defaults:
       run:
         working-directory: frontend
     steps:
+      - name: Check Vercel configuration
+        id: vercel
+        working-directory: .
+        run: |
+          if [[ -n "$VERCEL_TOKEN" && -n "$VERCEL_ORG_ID" && -n "$VERCEL_PROJECT_ID" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Vercel deploy skipped because required secrets are not configured."
+          fi
+
       - name: Checkout
+        if: ${{ steps.vercel.outputs.enabled == 'true' }}
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
 
       - name: Setup Node
+        if: ${{ steps.vercel.outputs.enabled == 'true' }}
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
 
       - name: Install Vercel CLI
+        if: ${{ steps.vercel.outputs.enabled == 'true' }}
         run: npm install --global vercel@53.4.0 --ignore-scripts
 
       - name: Pull Vercel environment
+        if: ${{ steps.vercel.outputs.enabled == 'true' }}
         run: vercel pull --yes --environment=production --token="${{ secrets.VERCEL_TOKEN }}"
 
       - name: Build Vercel artifacts
+        if: ${{ steps.vercel.outputs.enabled == 'true' }}
         run: vercel build --prod --token="${{ secrets.VERCEL_TOKEN }}"
 
       - name: Deploy to Vercel
+        if: ${{ steps.vercel.outputs.enabled == 'true' }}
         run: vercel deploy --prebuilt --prod --token="${{ secrets.VERCEL_TOKEN }}"
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
