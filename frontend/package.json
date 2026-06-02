@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@use-gesture/react": "^10.3.1",
-    "convex": "^1.32.0",
+    "convex": "^1.40.0",
     "framer-motion": "^12.34.3",
     "lucide-react": "^0.575.0",
     "next": "16.2.6",
@@ -36,7 +36,7 @@
     "jsdom": "^28.1.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.0"
   },
   "overrides": {
     "postcss": "^8.5.14"
