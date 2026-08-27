@@ -439,6 +439,8 @@ async def stream_research(person_name: str, image_url: str | None = None):
         agent_data: dict[str, str] = {}
 
         if deep_researcher:
+            result_iterator = None
+            result_task = None
             try:
                 result_iterator = pipeline.stream_research(person_name, person_id).__aiter__()
                 result_task = asyncio.create_task(anext(result_iterator))
@@ -470,6 +472,12 @@ async def stream_research(person_name: str, image_url: str | None = None):
                         "data": result.model_dump_json(),
                     }
                     result_task = asyncio.create_task(anext(result_iterator))
+
+                if live_session_task:
+                    live_session = await live_session_task
+                    live_session_task = None
+                    if live_session:
+                        yield {"event": "init", "data": _json.dumps(live_session)}
             except Exception as exc:
                 logger.error("stream_research crashed for {}: {}", person_name, exc)
                 failure = AgentResult(
@@ -479,11 +487,19 @@ async def stream_research(person_name: str, image_url: str | None = None):
                 )
                 all_sources.append(failure.agent_name)
                 yield {"event": "result", "data": failure.model_dump_json()}
-
-            if live_session_task:
-                live_session = await live_session_task
-                if live_session:
-                    yield {"event": "init", "data": _json.dumps(live_session)}
+            finally:
+                spawned_tasks = [
+                    task
+                    for task in (result_task, live_session_task)
+                    if task is not None
+                ]
+                for task in spawned_tasks:
+                    if not task.done():
+                        task.cancel()
+                if spawned_tasks:
+                    await asyncio.gather(*spawned_tasks, return_exceptions=True)
+                if result_iterator is not None:
+                    await result_iterator.aclose()
         elif exa_client:
             # Graceful fallback: still return actionable search results without Browser Use.
             try:

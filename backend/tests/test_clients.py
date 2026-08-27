@@ -183,6 +183,61 @@ def test_research_stream_emits_v4_session_before_results(monkeypatch) -> None:
     assert session_position < result_position
 
 
+@pytest.mark.anyio
+async def test_research_stream_cancels_pending_work_on_disconnect(monkeypatch) -> None:
+    import asyncio
+
+    import main as main_module
+    from agents.models import AgentResult, AgentStatus
+
+    never = asyncio.Event()
+    browser_started = asyncio.Event()
+    browser_cancelled = asyncio.Event()
+    research_started = asyncio.Event()
+    research_cancelled = asyncio.Event()
+
+    class FakeBrowserUseClient:
+        async def create_run(self, task, start_url=None):
+            browser_started.set()
+            try:
+                await never.wait()
+            finally:
+                browser_cancelled.set()
+
+    class FakePipeline:
+        async def stream_research(self, person_name, person_id):
+            research_started.set()
+            try:
+                await never.wait()
+                yield AgentResult(agent_name="never", status=AgentStatus.SUCCESS)
+            finally:
+                research_cancelled.set()
+
+    class FakeDatabase:
+        async def store_person(self, person_id, data):
+            return "person-v4"
+
+    monkeypatch.setattr(main_module, "bu_client", FakeBrowserUseClient())
+    monkeypatch.setattr(main_module, "deep_researcher", object())
+    monkeypatch.setattr(main_module, "pipeline", FakePipeline())
+    monkeypatch.setattr(main_module, "db_gateway", FakeDatabase())
+    monkeypatch.setattr(main_module, "synthesis_engine", None)
+
+    response = await main_module.stream_research("Ada")
+    body_iterator = response.body_iterator
+    await anext(body_iterator)
+    next_event = asyncio.create_task(anext(body_iterator))
+    await asyncio.wait_for(browser_started.wait(), timeout=1)
+    await asyncio.wait_for(research_started.wait(), timeout=1)
+
+    next_event.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await next_event
+
+    assert browser_cancelled.is_set()
+    assert research_cancelled.is_set()
+
+
 # --- ConvexGateway ---
 
 
