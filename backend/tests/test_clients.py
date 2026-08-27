@@ -1,15 +1,119 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 
+from agents.browser_use_client import BrowserUseClient, BrowserUseError
 from config import Settings
 from db.convex_client import ConvexGateway
 from enrichment.exa_client import ExaEnrichmentClient
 from enrichment.models import EnrichmentRequest
 from observability.laminar import initialize_laminar, traced
+
+# --- BrowserUseClient ---
+
+
+@pytest.mark.anyio
+async def test_browser_use_create_run_uses_v4_contract() -> None:
+    async def handler(request):
+        assert request.method == "POST"
+        assert request.url.path == "/api/v4/runs"
+        assert request.headers["X-Browser-Use-API-Key"] == "test-key"
+        assert not request.url.params
+        body = json.loads(request.content)
+        assert body == {
+            "task": "Open https://example.com first.\nFind the pricing page",
+            "browserSettings": {
+                "screenWidth": 1280,
+                "screenHeight": 800,
+                "record": True,
+            },
+            "maxCostUsd": 0.25,
+        }
+        return httpx.Response(
+            200,
+            json={"id": "run-1", "sessionId": "session-1", "status": "queued"},
+        )
+
+    client = BrowserUseClient(
+        Settings(BROWSER_USE_API_KEY="test-key"),
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.create_run("Find the pricing page", start_url="https://example.com")
+
+    assert result["id"] == "run-1"
+    assert result["sessionId"] == "session-1"
+
+
+@pytest.mark.anyio
+async def test_browser_use_reads_v4_session_run_and_events() -> None:
+    async def handler(request):
+        responses = {
+            "/api/v4/sessions/session-1": {
+                "sessionId": "session-1",
+                "latestRunId": "run-1",
+                "status": "running",
+            },
+            "/api/v4/runs/run-1": {"id": "run-1", "status": "completed", "result": "ok"},
+            "/api/v4/runs/run-1/events": {
+                "events": [
+                    {
+                        "type": "browser.ready",
+                        "data": {"live_view_url": "https://live.example/run-1"},
+                    }
+                ]
+            },
+        }
+        if request.url.path.endswith("/events"):
+            assert request.url.params["include_output"] == "false"
+        return httpx.Response(200, json=responses[request.url.path])
+
+    client = BrowserUseClient(
+        Settings(BROWSER_USE_API_KEY="test-key"),
+        transport=httpx.MockTransport(handler),
+    )
+
+    session = await client.get_session("session-1")
+    run = await client.get_run("run-1")
+    events = await client.get_run_events("run-1")
+
+    assert session["latestRunId"] == "run-1"
+    assert run["result"] == "ok"
+    assert events[0]["data"]["live_view_url"] == "https://live.example/run-1"
+
+
+@pytest.mark.anyio
+async def test_browser_use_raises_typed_error() -> None:
+    client = BrowserUseClient(
+        Settings(BROWSER_USE_API_KEY="test-key"),
+        transport=httpx.MockTransport(lambda request: httpx.Response(401, text="unauthorized")),
+    )
+
+    with pytest.raises(BrowserUseError, match="Browser Use API 401: unauthorized"):
+        await client.get_run("run-1")
+
+
+@pytest.mark.anyio
+async def test_browser_use_creates_v4_session_share() -> None:
+    async def handler(request):
+        assert request.method == "POST"
+        assert request.url.path == "/api/v4/sessions/session-1/share"
+        return httpx.Response(200, json={"shareUrl": "https://cloud.example/share/v4/token"})
+
+    client = BrowserUseClient(
+        Settings(BROWSER_USE_API_KEY="test-key"),
+        transport=httpx.MockTransport(handler),
+    )
+
+    share = await client.make_session_public("session-1")
+
+    assert share["shareUrl"] == "https://cloud.example/share/v4/token"
+
 
 # --- ConvexGateway ---
 

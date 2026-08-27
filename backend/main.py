@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from uuid import uuid4
@@ -44,7 +45,6 @@ from schemas import (
     SessionStatusResponse,
     TaskInfo,
     TaskPhase,
-    TaskStep,
 )
 from synthesis.anthropic_engine import AnthropicSynthesisEngine
 from synthesis.engine import GeminiSynthesisEngine
@@ -187,7 +187,7 @@ SOURCE_CONFIGS: dict[str, dict[str, str]] = {
     },
 }
 
-# Cache share URLs so we only call make_session_public once
+# Cache replay URLs so completed-session polling does not repeat the share request.
 _share_url_cache: dict[str, str] = {}
 
 
@@ -412,31 +412,26 @@ async def stream_research(person_name: str, image_url: str | None = None):
 
         # 2. Spawn live Browser Use session (X/Twitter) in background — don't block pipeline
         live_session_id = None
-        live_url = None
 
         async def spawn_live_session():
-            nonlocal live_session_id, live_url
+            nonlocal live_session_id
             if not bu_client:
                 return
             try:
                 twitter_cfg = SOURCE_CONFIGS["twitter"]
-                session = await bu_client.create_session(start_url=twitter_cfg["start_url"])
-                live_session_id = session["id"]
-                live_url = session.get("liveUrl")
                 prompt = twitter_cfg["prompt"].replace("{name}", person_name)
-                await bu_client.create_task(
-                    session_id=live_session_id,
+                run = await bu_client.create_run(
                     task=prompt,
                     start_url=twitter_cfg["start_url"],
                 )
-                logger.info("Live X session started: {} url={}", live_session_id, live_url)
+                live_session_id = run["sessionId"]
+                logger.info("Live X run started: {} session={}", run["id"], live_session_id)
             except Exception as exc:
                 logger.warning("Failed to spawn live X session: {}", exc)
 
         # Launch session spawn in background — doesn't block research
-        import asyncio as _asyncio
         if deep_researcher and bu_client:
-            _asyncio.create_task(spawn_live_session())
+            asyncio.create_task(spawn_live_session())
 
         # 3. Stream research results
         all_snippets: list[str] = []
@@ -577,7 +572,7 @@ async def audio_ws(websocket: WebSocket, room_code: str):
 
 @app.post("/api/agents/research", response_model=AgentStartResponse)
 async def start_research(req: AgentStartRequest) -> AgentStartResponse:
-    """Spawn Browser Use sessions/tasks per source type. Returns immediately."""
+    """Spawn one Browser Use V4 run per source type. Returns immediately."""
     if not bu_client:
         raise HTTPException(
             status_code=503,
@@ -590,20 +585,16 @@ async def start_research(req: AgentStartRequest) -> AgentStartResponse:
             logger.warning("Unknown source type: {}", source_key)
             continue
         try:
-            session = await bu_client.create_session(start_url=cfg["start_url"])
-            session_id = session["id"]
             prompt = cfg["prompt"].replace("{name}", req.person_name)
-            task = await bu_client.create_task(
-                session_id=session_id,
+            run = await bu_client.create_run(
                 task=prompt,
                 start_url=cfg["start_url"],
             )
             agents.append(AgentInfo(
                 source_tp=cfg["tp"],
                 source_nm=cfg["nm"],
-                session_id=session_id,
-                task_id=task["id"],
-                live_url=session.get("liveUrl"),
+                session_id=run["sessionId"],
+                task_id=run["id"],
                 session_status="running",
             ))
         except BrowserUseError as e:
@@ -620,6 +611,8 @@ def _map_bu_status(bu_status: str | None) -> str:
     mapping = {
         "active": "running",
         "created": "pending",
+        "queued": "pending",
+        "dispatching": "running",
         "started": "running",
         "running": "running",
         "idle": "running",
@@ -627,13 +620,15 @@ def _map_bu_status(bu_status: str | None) -> str:
         "stopped": "completed",
         "timed_out": "failed",
         "error": "failed",
+        "failed": "failed",
+        "cancelled": "failed",
     }
     return mapping.get(bu_status or "", "pending")
 
 
 @app.get("/api/agents/sessions/{session_id}", response_model=SessionStatusResponse)
 async def get_session_status(session_id: str) -> SessionStatusResponse:
-    """Proxy Browser Use session + task status for frontend polling."""
+    """Proxy the latest V4 run in a Browser Use session for frontend polling."""
     if not bu_client:
         return SessionStatusResponse(session_id=session_id, session_status="failed")
     try:
@@ -643,11 +638,11 @@ async def get_session_status(session_id: str) -> SessionStatusResponse:
         return SessionStatusResponse(session_id=session_id, session_status="failed")
 
     session_status = _map_bu_status(session.get("status"))
-    live_url = session.get("liveUrl")
-    share_url = session.get("publicShareUrl") or _share_url_cache.get(session_id)
+    run_id = session.get("latestRunId")
+    live_url = None
+    share_url = _share_url_cache.get(session_id)
 
-    # On first completed fetch, create public share for replay
-    if session_status == "completed" and not share_url and session_id not in _share_url_cache:
+    if session_status == "completed" and not share_url:
         try:
             share_data = await bu_client.make_session_public(session_id)
             share_url = share_data.get("shareUrl")
@@ -656,31 +651,24 @@ async def get_session_status(session_id: str) -> SessionStatusResponse:
         except BrowserUseError:
             logger.warning("Could not create public share for session {}", session_id)
 
-    # Get task details if available
     task_info = None
-    tasks_list = session.get("tasks", [])
-    if tasks_list:
-        task_id = tasks_list[0].get("id") if isinstance(tasks_list[0], dict) else tasks_list[0]
+    if run_id:
         try:
-            task_data = await bu_client.get_task(task_id)
-            raw_steps = task_data.get("steps", [])
-            steps = [
-                TaskStep(
-                    number=s.get("number", i + 1),
-                    url=s.get("url"),
-                    screenshot_url=s.get("screenshotUrl"),
-                    next_goal=s.get("nextGoal"),
-                )
-                for i, s in enumerate(raw_steps)
-            ]
+            run, events = await asyncio.gather(
+                bu_client.get_run(run_id),
+                bu_client.get_run_events(run_id),
+            )
+            for event in events:
+                data = event.get("data", {})
+                if data.get("live_view_url"):
+                    live_url = data["live_view_url"]
             task_info = TaskInfo(
-                task_id=task_id,
-                status=task_data.get("status"),
-                steps=steps,
-                output=task_data.get("output"),
+                task_id=run_id,
+                status=run.get("status"),
+                output=run.get("result") or run.get("error"),
             )
         except BrowserUseError:
-            logger.warning("Could not get task {} for session {}", task_id, session_id)
+            logger.warning("Could not get run {} for session {}", run_id, session_id)
 
     return SessionStatusResponse(
         session_id=session_id,
