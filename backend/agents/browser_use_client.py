@@ -38,7 +38,29 @@ class BrowserUseClient:
         if resp.status_code >= 400:
             logger.error("Browser Use API error: {} {}", resp.status_code, resp.text[:200])
             raise BrowserUseError(resp.status_code, resp.text[:200])
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise BrowserUseError(resp.status_code, "invalid JSON response") from exc
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        try:
+            async with httpx.AsyncClient(timeout=30, transport=self._transport) as client:
+                response = await client.request(
+                    method,
+                    f"{BU_BASE}{path}",
+                    headers=self._headers,
+                    **kwargs,
+                )
+        except httpx.HTTPError as exc:
+            logger.error("Browser Use API request failed: {}", type(exc).__name__)
+            raise BrowserUseError(0, f"request failed: {type(exc).__name__}") from exc
+        return self._check(response)
 
     async def create_run(
         self,
@@ -65,9 +87,7 @@ class BrowserUseClient:
             },
             "maxCostUsd": MAX_RUN_COST_USD,
         }
-        async with httpx.AsyncClient(timeout=30, transport=self._transport) as c:
-            resp = await c.post(f"{BU_BASE}/runs", json=body, headers=self._headers)
-        result = self._check(resp)
+        result = await self._request("POST", "/runs", json=body)
         logger.info(
             "Created BU V4 run {} in session {}",
             result.get("id"),
@@ -77,33 +97,23 @@ class BrowserUseClient:
 
     async def get_session(self, session_id: str) -> dict[str, Any]:
         """Get V4 metadata for a session and its latest run."""
-        async with httpx.AsyncClient(timeout=30, transport=self._transport) as c:
-            resp = await c.get(f"{BU_BASE}/sessions/{session_id}", headers=self._headers)
-        return self._check(resp)
+        return await self._request("GET", f"/sessions/{session_id}")
 
     async def get_run(self, run_id: str) -> dict[str, Any]:
         """Get the full V4 run, including its final result or error."""
-        async with httpx.AsyncClient(timeout=30, transport=self._transport) as c:
-            resp = await c.get(f"{BU_BASE}/runs/{run_id}", headers=self._headers)
-        return self._check(resp)
+        return await self._request("GET", f"/runs/{run_id}")
 
     async def get_run_events(self, run_id: str) -> list[dict[str, Any]]:
         """Get V4 run events used to discover the current live browser URL."""
-        async with httpx.AsyncClient(timeout=30, transport=self._transport) as c:
-            resp = await c.get(
-                f"{BU_BASE}/runs/{run_id}/events",
-                params={"include_output": "false"},
-                headers=self._headers,
-            )
-        return self._check(resp).get("events", [])
+        result = await self._request(
+            "GET",
+            f"/runs/{run_id}/events",
+            params={"include_output": "false"},
+        )
+        return result.get("events", [])
 
     async def make_session_public(self, session_id: str) -> dict[str, Any]:
         """Enable the V4 session's public, read-only replay link."""
-        async with httpx.AsyncClient(timeout=30, transport=self._transport) as c:
-            resp = await c.post(
-                f"{BU_BASE}/sessions/{session_id}/share",
-                headers=self._headers,
-            )
-        result = self._check(resp)
+        result = await self._request("POST", f"/sessions/{session_id}/share")
         logger.info("Public share created for V4 session {}", session_id)
         return result

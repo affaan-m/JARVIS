@@ -99,6 +99,35 @@ async def test_browser_use_raises_typed_error() -> None:
 
 
 @pytest.mark.anyio
+async def test_browser_use_wraps_transport_error() -> None:
+    def handler(request):
+        raise httpx.ConnectError("connection failed", request=request)
+
+    client = BrowserUseClient(
+        Settings(BROWSER_USE_API_KEY="test-key"),
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(BrowserUseError, match="request failed: ConnectError") as exc_info:
+        await client.get_run("run-1")
+
+    assert isinstance(exc_info.value.__cause__, httpx.ConnectError)
+
+
+@pytest.mark.anyio
+async def test_browser_use_wraps_invalid_json() -> None:
+    client = BrowserUseClient(
+        Settings(BROWSER_USE_API_KEY="test-key"),
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, text="not-json")),
+    )
+
+    with pytest.raises(BrowserUseError, match="invalid JSON response") as exc_info:
+        await client.get_run("run-1")
+
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+@pytest.mark.anyio
 async def test_browser_use_creates_v4_session_share() -> None:
     async def handler(request):
         assert request.method == "POST"
@@ -113,6 +142,45 @@ async def test_browser_use_creates_v4_session_share() -> None:
     share = await client.make_session_public("session-1")
 
     assert share["shareUrl"] == "https://cloud.example/share/v4/token"
+
+
+def test_research_stream_emits_v4_session_before_results(monkeypatch) -> None:
+    import asyncio
+
+    from fastapi.testclient import TestClient
+
+    import main as main_module
+    from agents.models import AgentResult, AgentStatus
+
+    class FakeBrowserUseClient:
+        async def create_run(self, task, start_url=None):
+            return {"id": "run-v4", "sessionId": "session-v4"}
+
+    class FakePipeline:
+        async def stream_research(self, person_name, person_id):
+            await asyncio.sleep(0.01)
+            yield AgentResult(
+                agent_name="test_agent",
+                status=AgentStatus.SUCCESS,
+                snippets=["result"],
+            )
+
+    class FakeDatabase:
+        async def store_person(self, person_id, data):
+            return "person-v4"
+
+    monkeypatch.setattr(main_module, "bu_client", FakeBrowserUseClient())
+    monkeypatch.setattr(main_module, "deep_researcher", object())
+    monkeypatch.setattr(main_module, "pipeline", FakePipeline())
+    monkeypatch.setattr(main_module, "db_gateway", FakeDatabase())
+    monkeypatch.setattr(main_module, "synthesis_engine", None)
+
+    response = TestClient(main_module.app).get("/api/research/Ada/stream")
+
+    assert response.status_code == 200
+    session_position = response.text.index('"live_session_id": "session-v4"')
+    result_position = response.text.index('"agent_name":"test_agent"')
+    assert session_position < result_position
 
 
 # --- ConvexGateway ---

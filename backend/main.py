@@ -411,12 +411,9 @@ async def stream_research(person_name: str, image_url: str | None = None):
         logger.info("SSE stream started for {}", person_name)
 
         # 2. Spawn live Browser Use session (X/Twitter) in background — don't block pipeline
-        live_session_id = None
-
-        async def spawn_live_session():
-            nonlocal live_session_id
+        async def spawn_live_session() -> dict[str, str | None] | None:
             if not bu_client:
-                return
+                return None
             try:
                 twitter_cfg = SOURCE_CONFIGS["twitter"]
                 prompt = twitter_cfg["prompt"].replace("{name}", person_name)
@@ -424,14 +421,16 @@ async def stream_research(person_name: str, image_url: str | None = None):
                     task=prompt,
                     start_url=twitter_cfg["start_url"],
                 )
-                live_session_id = run["sessionId"]
-                logger.info("Live X run started: {} session={}", run["id"], live_session_id)
+                logger.info("Live X run started: {} session={}", run["id"], run["sessionId"])
+                return {"live_session_id": run["sessionId"], "live_url": None}
             except Exception as exc:
                 logger.warning("Failed to spawn live X session: {}", exc)
+                return None
 
         # Launch session spawn in background — doesn't block research
+        live_session_task = None
         if deep_researcher and bu_client:
-            asyncio.create_task(spawn_live_session())
+            live_session_task = asyncio.create_task(spawn_live_session())
 
         # 3. Stream research results
         all_snippets: list[str] = []
@@ -441,7 +440,26 @@ async def stream_research(person_name: str, image_url: str | None = None):
 
         if deep_researcher:
             try:
-                async for result in pipeline.stream_research(person_name, person_id):
+                result_iterator = pipeline.stream_research(person_name, person_id).__aiter__()
+                result_task = asyncio.create_task(anext(result_iterator))
+                while True:
+                    pending = {result_task}
+                    if live_session_task:
+                        pending.add(live_session_task)
+                    done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+
+                    if live_session_task and live_session_task in done:
+                        live_session = live_session_task.result()
+                        live_session_task = None
+                        if live_session:
+                            yield {"event": "init", "data": _json.dumps(live_session)}
+
+                    if result_task not in done:
+                        continue
+                    try:
+                        result = result_task.result()
+                    except StopAsyncIteration:
+                        break
                     all_snippets.extend(result.snippets[:3])
                     all_urls.extend(result.urls_found[:5])
                     all_sources.append(result.agent_name)
@@ -451,6 +469,7 @@ async def stream_research(person_name: str, image_url: str | None = None):
                         "event": "result",
                         "data": result.model_dump_json(),
                     }
+                    result_task = asyncio.create_task(anext(result_iterator))
             except Exception as exc:
                 logger.error("stream_research crashed for {}: {}", person_name, exc)
                 failure = AgentResult(
@@ -460,6 +479,11 @@ async def stream_research(person_name: str, image_url: str | None = None):
                 )
                 all_sources.append(failure.agent_name)
                 yield {"event": "result", "data": failure.model_dump_json()}
+
+            if live_session_task:
+                live_session = await live_session_task
+                if live_session:
+                    yield {"event": "init", "data": _json.dumps(live_session)}
         elif exa_client:
             # Graceful fallback: still return actionable search results without Browser Use.
             try:
