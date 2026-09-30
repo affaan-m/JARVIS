@@ -24,26 +24,19 @@ COMMAND_PATTERNS: list[tuple[str, str]] = [
 class AudioCommandProcessor:
     """Processes audio chunks: transcribes via Gemini, matches voice commands."""
 
-    def __init__(self, gemini_api_key: str):
-        self._api_key = gemini_api_key
-        self._client = None
+    def __init__(self, gemini_api_key: str, gemini_models: str | None = None):
+        from gemini_pool import GeminiRotator
 
-    def _get_client(self):
-        if self._client is None:
-            from google import genai
-            self._client = genai.Client(api_key=self._api_key)
-        return self._client
+        self._rotator = GeminiRotator(gemini_api_key, gemini_models)
 
     async def transcribe_chunk(self, audio_bytes: bytes) -> str:
         """Transcribe audio bytes via Gemini Flash with inline audio."""
         import asyncio
 
-        client = self._get_client()
         b64_audio = base64.b64encode(audio_bytes).decode()
         try:
             result = await asyncio.to_thread(
-                client.models.generate_content,
-                model="gemini-2.0-flash",
+                self._rotator.generate_content,
                 contents=[
                     {
                         "parts": [

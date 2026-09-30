@@ -420,3 +420,79 @@ def test_dossier_to_frontend_dict_matches_expected_shape() -> None:
     assert d["workHistory"][0]["role"] == "Software Engineer"
     assert d["education"][0]["school"] == "Stanford University"
     assert d["socialProfiles"]["twitter"] == "@alice"
+
+
+@pytest.mark.anyio
+async def test_exa_uses_people_category_for_name_lookup() -> None:
+    client = ExaEnrichmentClient(Settings(EXA_API_KEY="test-key-123"))
+    mock_exa = MagicMock()
+    mock_exa.search_and_contents.return_value = SimpleNamespace(results=MOCK_EXA_RESULTS)
+    client._client = mock_exa
+
+    result = await client.enrich_person(EnrichmentRequest(name="Alice Smith"))
+
+    assert result.success is True
+    assert len(result.hits) == 2
+    mock_exa.search_and_contents.assert_called_once()
+    assert mock_exa.search_and_contents.call_args.kwargs["category"] == "people"
+
+
+@pytest.mark.anyio
+async def test_exa_people_search_falls_back_to_web_when_empty() -> None:
+    client = ExaEnrichmentClient(Settings(EXA_API_KEY="test-key-123"))
+    mock_exa = MagicMock()
+    mock_exa.search_and_contents.side_effect = [
+        SimpleNamespace(results=[]),
+        SimpleNamespace(results=MOCK_EXA_RESULTS),
+    ]
+    client._client = mock_exa
+
+    result = await client.enrich_person(EnrichmentRequest(name="Alice Smith"))
+
+    assert len(result.hits) == 2
+    calls = mock_exa.search_and_contents.call_args_list
+    assert calls[0].kwargs.get("category") == "people"
+    assert "category" not in calls[1].kwargs
+
+
+@pytest.mark.anyio
+async def test_exa_people_search_falls_back_to_web_on_error() -> None:
+    client = ExaEnrichmentClient(Settings(EXA_API_KEY="test-key-123"))
+    mock_exa = MagicMock()
+    mock_exa.search_and_contents.side_effect = [
+        Exception("category not available on plan"),
+        SimpleNamespace(results=MOCK_EXA_RESULTS),
+    ]
+    client._client = mock_exa
+
+    result = await client.enrich_person(EnrichmentRequest(name="Alice Smith"))
+
+    assert result.success is True
+    assert len(result.hits) == 2
+
+
+@pytest.mark.anyio
+async def test_exa_context_query_skips_people_category() -> None:
+    client = ExaEnrichmentClient(Settings(EXA_API_KEY="test-key-123"))
+    mock_exa = MagicMock()
+    mock_exa.search_and_contents.return_value = SimpleNamespace(results=MOCK_EXA_RESULTS)
+    client._client = mock_exa
+
+    await client.enrich_person(
+        EnrichmentRequest(name="Alice Smith", additional_context="social media profiles")
+    )
+
+    mock_exa.search_and_contents.assert_called_once()
+    assert "category" not in mock_exa.search_and_contents.call_args.kwargs
+
+
+@pytest.mark.anyio
+async def test_exa_people_search_can_be_disabled() -> None:
+    client = ExaEnrichmentClient(Settings(EXA_API_KEY="test-key-123", EXA_PEOPLE_SEARCH=False))
+    mock_exa = MagicMock()
+    mock_exa.search_and_contents.return_value = SimpleNamespace(results=MOCK_EXA_RESULTS)
+    client._client = mock_exa
+
+    await client.enrich_person(EnrichmentRequest(name="Alice Smith"))
+
+    assert "category" not in mock_exa.search_and_contents.call_args.kwargs

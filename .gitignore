@@ -47,3 +47,7 @@ agent_credentials.json
 output/
 conversasion.md
 conversation.md
+
+# Local test/runtime artifacts
+.coverage
+accounts.db

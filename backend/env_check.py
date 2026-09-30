@@ -25,6 +25,7 @@ _SERVICE_ENV_MAP: dict[str, list[str]] = {
     "gemini": ["GEMINI_API_KEY"],
     "browser_use": ["BROWSER_USE_API_KEY"],
     "openai": ["OPENAI_API_KEY"],
+    "nvidia": ["NVIDIA_API_KEY"],
     "mongodb": ["MONGODB_URI"],
     "telegram": ["TELEGRAM_BOT_TOKEN"],
 }

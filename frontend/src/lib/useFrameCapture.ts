@@ -33,7 +33,7 @@ interface UseFrameCaptureOptions {
 }
 
 const DEFAULT_INTERVAL = 2500;
-const DEFAULT_BACKEND = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const DEFAULT_BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export function useFrameCapture({
   videoRef,

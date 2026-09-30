@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "JARVIS API"
+    # Opt-in hunters game for consenting colleagues; off means the routes 404
+    game_mode: bool = Field(default=False, alias="JARVIS_GAME_MODE")
     environment: str = Field(default="development", alias="JARVIS_ENV")
     log_level: str = Field(default="INFO", alias="JARVIS_LOG_LEVEL")
     frontend_origin: str = Field(default="http://localhost:3000", alias="JARVIS_FRONTEND_ORIGIN")
@@ -27,11 +29,25 @@ class Settings(BaseSettings):
     convex_url: str | None = Field(default=None, alias="CONVEX_URL")
     mongodb_uri: str | None = Field(default=None, alias="MONGODB_URI")
     exa_api_key: str | None = Field(default=None, alias="EXA_API_KEY")
+    # Use Exa's people index (category="people") for plain name lookups
+    exa_people_search: bool = Field(default=True, alias="EXA_PEOPLE_SEARCH")
     browser_use_api_key: str | None = Field(default=None, alias="BROWSER_USE_API_KEY")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    # Several comma-separated keys and/or models are rotated round-robin.
     gemini_api_key: str | None = Field(default=None, alias="GEMINI_API_KEY")
+    gemini_models: str = Field(default="gemini-2.0-flash", alias="GEMINI_MODELS")
     laminar_api_key: str | None = Field(default=None, alias="LMNR_PROJECT_API_KEY")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
+    # NVIDIA API catalog (build.nvidia.com) — OpenAI-compatible endpoint.
+    # Accepts several comma-separated keys; they are used round-robin.
+    nvidia_api_key: str | None = Field(default=None, alias="NVIDIA_API_KEY")
+    nvidia_base_url: str = Field(
+        default="https://integrate.api.nvidia.com/v1", alias="NVIDIA_BASE_URL"
+    )
+    nvidia_model: str = Field(default="meta/llama-3.3-70b-instruct", alias="NVIDIA_MODEL")
+    # Comma-separated models, rotated together with the keys (overrides NVIDIA_MODEL)
+    nvidia_models: str | None = Field(default=None, alias="NVIDIA_MODELS")
+    nvidia_agent_model: str | None = Field(default=None, alias="NVIDIA_AGENT_MODEL")
     telegram_bot_token: str | None = Field(default=None, alias="TELEGRAM_BOT_TOKEN")
     hibp_api_key: str | None = Field(default=None, alias="HIBP_API_KEY")
     pimeyes_account_pool: str = Field(default="[]", alias="PIMEYES_ACCOUNT_POOL")
@@ -46,6 +62,11 @@ class Settings(BaseSettings):
     browser_use_profile_id: str | None = Field(default=None, alias="BROWSER_USE_PROFILE_ID")
     op_vault_id: str | None = Field(default=None, alias="OP_VAULT_ID")
 
+    def nvidia_model_list(self) -> list[str]:
+        from key_pool import parse_keys
+
+        return parse_keys(self.nvidia_models) or [self.nvidia_model]
+
     def service_flags(self) -> dict[str, bool]:
         return {
             "convex": bool(self.convex_url),
@@ -55,6 +76,7 @@ class Settings(BaseSettings):
             "openai": bool(self.openai_api_key),
             "gemini": bool(self.gemini_api_key),
             "anthropic": bool(self.anthropic_api_key),
+            "nvidia": bool(self.nvidia_api_key),
             "laminar": bool(self.laminar_api_key),
             "telegram": bool(self.telegram_bot_token),
             "hibp": bool(self.hibp_api_key),

@@ -47,6 +47,10 @@ cp .env.example .env
 # Fill in your API keys in .env
 ```
 
+### Windows: one-click start
+
+Run `start.bat` from the repo root. It creates `.env` from `.env.example` if missing, sets up `backend\.venv`, installs backend and frontend dependencies on first run, then opens the backend (port 8000) and frontend (port 3000) in separate windows. Use `start.bat --install` to reinstall dependencies.
+
 ### 2. Backend
 
 ```bash

@@ -54,6 +54,9 @@ class FrameHandler:
         self._face_detector = face_detector
         self._embedder = embedder
         self._face_searcher = face_searcher
+        # YOLO's tracker keeps state across calls, so detection is serialized.
+        self._detect_lock = asyncio.Lock()
+        self._last_detections: list[dict] = []
         self._seen_tracks: set[int] = set()
         self._identifications: dict[int, Identification] = {}
         # Track IDs that already had identification spawned (prevent double-spawn)
@@ -76,9 +79,19 @@ class FrameHandler:
     ) -> dict:
         capture_id = f"cap_{uuid4().hex[:12]}"
 
-        # Step 1: Detect humans (YOLO)
-        result = self.detector.detect_from_base64(frame_b64)
-        detections = result["detections"]
+        # Step 1: Detect humans (YOLO) off the event loop, one frame at a time.
+        # Polling frames that arrive while a detection runs are dropped and reuse
+        # the previous result — stale frames are worthless and queueing them is
+        # what makes the stream stutter. Targeting frames always wait their turn.
+        if target or not self._detect_lock.locked():
+            async with self._detect_lock:
+                result = await asyncio.to_thread(
+                    self.detector.detect_from_base64, frame_b64,
+                )
+            detections = result["detections"]
+            self._last_detections = detections
+        else:
+            detections = self._last_detections
 
         # Step 2: Track new persons (for detection count only)
         new_detections = []
@@ -92,7 +105,9 @@ class FrameHandler:
         # Regular polling frames just do YOLO detection — no PimEyes spend
         if target and detections and not self._search_in_progress:
             # Use ALL detections (not just new) since user is targeting NOW
-            crops = self.detector.crop_persons(frame_b64, detections)
+            crops = await asyncio.to_thread(
+                self.detector.crop_persons, frame_b64, detections,
+            )
             logger.info("TARGET mode: {} person(s) detected, {} crop(s)", len(detections), len(crops))  # noqa: E501
 
             if crops:
@@ -183,7 +198,9 @@ class FrameHandler:
                 face = face_result.faces[0]
                 logger.info("Face detected in crop for track_id={} conf={:.2f}", tid, face.confidence)  # noqa: E501
                 # Step 2: ArcFace embedding
-                embedding = self._embedder.embed(face, crop_bytes)
+                embedding = await asyncio.to_thread(
+                    self._embedder.embed, face, crop_bytes,
+                )
                 logger.info("Embedding generated for track_id={} dim={}", tid, len(embedding))
             else:
                 logger.info("No face in crop for track_id={}, still sending crop to PimEyes", tid)
@@ -191,7 +208,9 @@ class FrameHandler:
             # Step 3: Try the upscaled crop first; if PimEyes can't detect
             # a face in it, fall back to the full frame (higher resolution,
             # more context for PimEyes' face detector).
-            pimeyes_image = self._upscale_for_pimeyes(crop_bytes)
+            pimeyes_image = await asyncio.to_thread(
+                self._upscale_for_pimeyes, crop_bytes,
+            )
 
             # If crop is very small (<150px shortest side), prefer full frame
             from io import BytesIO as _BytesIO
@@ -206,7 +225,9 @@ class FrameHandler:
                         short_side,
                     )
                     full_frame_bytes = base64.b64decode(frame_b64)
-                    pimeyes_image = self._upscale_for_pimeyes(full_frame_bytes)
+                    pimeyes_image = await asyncio.to_thread(
+                        self._upscale_for_pimeyes, full_frame_bytes,
+                    )
             except Exception:
                 pass  # Stick with crop
 

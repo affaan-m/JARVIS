@@ -5,6 +5,7 @@ import json
 from loguru import logger
 
 from config import Settings
+from gemini_pool import GeminiRotator
 from synthesis.models import (
     DossierReport,
     EducationEntry,
@@ -64,18 +65,12 @@ class GeminiSynthesisEngine:
 
     def __init__(self, settings: Settings):
         self._settings = settings
-        self._client = None
+        self._client = None  # set in tests to bypass real clients
+        self._rotator = GeminiRotator(settings.gemini_api_key, settings.gemini_models)
 
     @property
     def configured(self) -> bool:
-        return bool(self._settings.gemini_api_key)
-
-    def _get_client(self):
-        if self._client is None:
-            from google import genai
-
-            self._client = genai.Client(api_key=self._settings.gemini_api_key)
-        return self._client
+        return self._rotator.configured
 
     def _build_raw_data_block(self, request: SynthesisRequest) -> str:
         sections: list[str] = []
@@ -180,11 +175,8 @@ class GeminiSynthesisEngine:
                 raw_data=raw_data,
             )
 
-            client = self._get_client()
-            response = client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=prompt,
-            )
+            self._rotator.client_override = self._client
+            response = self._rotator.generate_content(contents=prompt)
 
             response_text = response.text
             if not response_text:

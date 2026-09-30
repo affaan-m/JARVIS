@@ -496,7 +496,7 @@ export default function IntelBoard() {
   // Health check: verify backend is reachable on mount
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   useEffect(() => {
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     fetch(`${API_BASE}/api/health`, { signal: AbortSignal.timeout(3000) })
       .then((r) => { setBackendOnline(r.ok); })
       .catch(() => { setBackendOnline(false); });
@@ -852,7 +852,7 @@ export default function IntelBoard() {
     const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
     const base64 = dataUrl.split(",")[1];
 
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
     // Show "identifying" immediately since we know we're sending a face
     setPipelineStatus({ stage: "identifying", trackId: -1 });

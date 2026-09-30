@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef } from "react";
 import type { Dossier, IntelPerson, IntelSource } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 /** Strip noise from raw backend snippets */
 function cleanSnippet(text: string): string {

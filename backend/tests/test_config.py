@@ -7,7 +7,7 @@ from config import Settings
 
 ALL_SERVICE_FLAGS = {
     "convex", "mongodb", "exa", "browser_use", "openai",
-    "gemini", "anthropic", "laminar", "telegram", "hibp",
+    "gemini", "anthropic", "nvidia", "laminar", "telegram", "hibp",
     "pimeyes_pool", "supermemory", "daytona", "hud", "agentmail",
     "pimeyes", "sixtyfour", "browser_use_profile",
 }
@@ -58,6 +58,7 @@ def test_settings_service_flags_with_all_keys() -> None:
         "OPENAI_API_KEY": "sk-key",
         "GEMINI_API_KEY": "gem-key",
         "ANTHROPIC_API_KEY": "anthropic-key",
+        "NVIDIA_API_KEY": "nvapi-key",
         "LMNR_PROJECT_API_KEY": "lam-key",
         "TELEGRAM_BOT_TOKEN": "bot-token",
         "HIBP_API_KEY": "hibp-key",

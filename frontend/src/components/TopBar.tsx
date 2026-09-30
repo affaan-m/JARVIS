@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Radio, Eye } from "lucide-react";
+import Link from "next/link";
+import { Radio, Eye, Crosshair } from "lucide-react";
 
 function JarvisLogo({ size = 26 }: { size?: number }) {
   return (
@@ -118,6 +119,21 @@ export function TopBar({ personCount, isLive = false, children }: TopBarProps) {
       {/* Actions + Clock */}
       <div className="flex items-center gap-4">
         {children}
+        <Link
+          href="/game"
+          className="flex items-center gap-1.5 rounded px-2 py-1"
+          style={{
+            border: "1px solid rgba(74,222,128,.12)",
+            background: "rgba(74,222,128,.04)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            letterSpacing: ".18em",
+            color: "rgba(200,214,176,.7)",
+          }}
+        >
+          <Crosshair className="w-3 h-3" style={{ color: "rgba(231,76,60,.7)" }} />
+          GAME
+        </Link>
         <div style={{
           padding: "3px 10px", borderRadius: 2,
           background: "rgba(74,222,128,.04)", border: "1px solid rgba(74,222,128,.08)",

@@ -10,7 +10,9 @@ class ExaEnrichmentClient:
     """Exa API client for person enrichment lookups.
 
     RESEARCH: Checked exa-py (official SDK), tavily-python, serper-dev
-    DECISION: Using exa-py — official SDK, neural search, best for person lookups
+    DECISION: Using exa-py — official SDK, neural search, best for person lookups.
+      Plain name lookups hit Exa's people index (category="people") first and fall
+      back to general web search when it errors or returns nothing.
     """
 
     def __init__(self, settings: Settings):
@@ -52,13 +54,30 @@ class ExaEnrichmentClient:
             if request.additional_context:
                 search_query += f" {request.additional_context}"
 
-            response = exa.search_and_contents(
-                search_query,
-                type="auto",
-                num_results=10,
-                text={"max_characters": 1000},
-                highlights=True,
-            )
+            search_kwargs = {
+                "type": "auto",
+                "num_results": 10,
+                "text": {"max_characters": 1000},
+                "highlights": True,
+            }
+
+            response = None
+            # Context queries ("social media profiles", ...) need the general web index
+            if self._settings.exa_people_search and not request.additional_context:
+                try:
+                    response = exa.search_and_contents(
+                        search_query, category="people", **search_kwargs
+                    )
+                    logger.info(
+                        "Exa people search returned {} results for query={}",
+                        len(response.results), query,
+                    )
+                except Exception as e:
+                    logger.warning("Exa people search failed, using web search: {}", e)
+                    response = None
+
+            if response is None or not response.results:
+                response = exa.search_and_contents(search_query, **search_kwargs)
 
             hits: list[EnrichmentHit] = []
             for result in response.results:
